@@ -1,5 +1,7 @@
 # End to End AI Agent 보안 가시화 기술 개발 with COONTEC Co., Ltd.
 
+![alt text](sgchito.png)
+
 # Target Agent
 ## 🦞 OpenClaw — Personal AI Assistant
 
@@ -17,33 +19,6 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 
 **우리는 사용자가 OpenClaw를 더욱 안심하고 사용할 수 있도록,  
 취약점 스캔 및 LLM 오판 방어 기능을 갖춘 보안 기술(MVP)을 개발하고자 합니다.**
-
-
-아래는 **Security Tool MVP**와 **OpenClaw 런타임**의 관계 목표이다.
-
-```mermaid
-flowchart LR
-  subgraph security_tool [Security Tool MVP]
-    Scenarios[Threat Scenarios]
-    Probes[Test Probes]
-    Defender[Defense Logic]
-    Viz[Visualization]
-  end
-  subgraph openclaw [OpenClaw]
-    Gateway[Gateway HTTP/WS]
-    Tools[Tool Execution]
-    Prompt[System Prompt / Context]
-  end
-  Scenarios --> Probes
-  Probes -->|invoke / probe| Gateway
-  Probes --> Viz
-  Gateway --> Tools
-  Gateway --> Prompt
-  Defender -->|harden| Gateway
-  Defender -->|harden| Tools
-  Tools --> Viz
-  Prompt --> Viz
-```
 
 ---
 
