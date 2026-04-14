@@ -1,0 +1,29 @@
+# Python
+scripts/.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 실행 결과 (로컬 전용)
+runs/
+
+# 로그
+*.log
+
+# 시크릿 (절대 커밋 금지)
+.env
+*.secret
+*-auth.json
+auth-profiles.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Claude Code 로컬 상태
+.claude/

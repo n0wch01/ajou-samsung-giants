@@ -1,0 +1,23 @@
+rule_id: s3-rate-limit
+name: "API 호출 빈도 제한"
+description: "단위 시간 내 동일 도구 호출 횟수가 임계값을 초과하면 발화"
+threat_type: API Abuse / DoS
+severity: high
+
+conditions:
+  # 슬라이딩 윈도우 내 동일 tool 호출 횟수
+  window_seconds: 30
+  max_calls: 10
+
+  # 동일 인자로 반복 호출 (루프 탐지)
+  max_identical_consecutive: 5
+
+actions:
+  on_warning:
+    threshold: 7  # 경고 시작 기준
+    action: log_warning
+    message: "도구 호출 빈도가 증가하고 있습니다 ({count}회/{window}초)"
+
+  on_trigger:
+    action: abort_session
+    message: "API Abuse 탐지: {tool}이 {window}초 내 {count}회 호출됨 (임계값: {max})"
