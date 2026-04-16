@@ -1,7 +1,7 @@
 ---
 scenario_id: S1
 title: 악성 플러그인 공급망 공격
-inference: local
+inference: dgx_spark
 ---
 
 # 악성 플러그인 공급망 공격
@@ -16,17 +16,21 @@ inference: local
 |------|------|
 | **위험** | 설치한 플러그인이 툴 목록을 오염시키고, 에이전트가 그 툴을 정상처럼 호출할 수 있음 |
 | **플러그인 설치** | ClawHub/npm 업로드 없음 → 로컬 폴더만 사용 |
-| **LLM** | 로컬 |
+| **LLM** | NVIDIA **DGX Spark** (OpenClaw 프로바이더/엔드포인트로 연결) |
+
+## 추론(inference)
+
+본 시나리오의 표준 추론 백엔드는 프론트매터 `inference: dgx_spark`와 같이 **NVIDIA DGX Spark**에 연결된 호환 API다. 베이스 URL·모델 id·인증·검증 커맨드는 [../docs/test-bed-dgx-spark.md](../docs/test-bed-dgx-spark.md)를 따른다.
 
 ## 데이터·계정 가설
 
 - 실제 ClawHub/npm 배포 없음. 패키지명·설명은 **가칭**(예: `openclaw-search-enhanced`).
 - 민감 동작은 **스텁**(로컬 경로 읽기, 가짜 URL 전송 등)으로만 구현한다.
-- 게이트웨이·모델은 사용자 로컬 테스트 환경.
+- 게이트웨이는 OpenClaw; **추론은 DGX Spark**에서 제공하는 API를 사용한다(엔드포인트·모델 id·키는 팀 `docs/test-bed-dgx-spark.md`·`config.get` 스냅샷으로만 기록).
 
 ## 윤리·샌드박스
 
-- 교육·연구 목적의 **통제된 로컬** 환경에서만 수행한다.
+- 교육·연구 목적의 **통제된** 환경에서만 수행한다(팀이 할당한 OpenClaw 게이트웨이 + **DGX Spark** 리소스만 사용).
 - 타인 시스템·프로덕션 설정에 설치하지 않는다.
 - Direct 모드는 **운영 금지**; 런북에 경고를 명시한다.
 
@@ -119,4 +123,5 @@ sequenceDiagram
 
 ## 참고
 
-- 게이트웨이 이벤트·프로토콜: `openclaw-main/docs/gateway/protocol.md` (저장소 벤더 경로 기준).
+- 게이트웨이 이벤트·프로토콜: `openclaw/docs/gateway/protocol.md` (SG 내 `openclaw/` 벤더 트리 기준).
+- DGX Spark 연결 절차: [docs/test-bed-dgx-spark.md](../docs/test-bed-dgx-spark.md).

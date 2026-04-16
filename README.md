@@ -20,6 +20,8 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 **우리는 사용자가 OpenClaw를 더욱 안심하고 사용할 수 있도록,  
 취약점 스캔 및 LLM 오판 방어 기능을 갖춘 보안 기술(MVP)을 개발하고자 합니다.**
 
+보안 가시화 **로드맵·할 일**은 Cursor 플랜 `openclaw_보안가시화.plan.md`가 SSOT이다. 추론( LLM )은 **NVIDIA DGX Spark**를 사용하고, 게이트웨이 연결·검증 절차는 [docs/test-bed-dgx-spark.md](docs/test-bed-dgx-spark.md)를 본다.
+
 ---
 
 # Git-flow 전략

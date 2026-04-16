@@ -4,7 +4,7 @@ scenarios:
   - id: S1
     title: 악성 플러그인 공급망 공격
     path: s1-plugin-supply-chain.md
-    inference: local
+    inference: dgx_spark
     status: active
     notes: "SSOT 단일 파일: scenarios/s1-plugin-supply-chain.md"
 
@@ -12,11 +12,11 @@ scenarios:
   - id: S2
     title: Data leakage
     path: s2-data-leakage.md
-    inference: local
+    inference: dgx_spark
     status: planned
 
   - id: S3
     title: API abuse / DoS
     path: s3-api-abuse.md
-    inference: local
+    inference: dgx_spark
     status: planned
