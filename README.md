@@ -36,7 +36,6 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 
 | 문서 | 용도 |
 |------|------|
-| Cursor 플랜 `openclaw_보안가시화.plan.md` | 로드맵·페이즈·할 일 (SSOT) |
 | [docs/test-bed-dgx-spark.md](docs/test-bed-dgx-spark.md) | 추론: **NVIDIA DGX Spark**, 게이트웨이 연결·검증 |
 | [docs/sentinel.md](docs/sentinel.md) | Python Sentinel 정책, 오탐, `sessions.abort` 가드 |
 
