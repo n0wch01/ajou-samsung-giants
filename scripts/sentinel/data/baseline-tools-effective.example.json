@@ -1,0 +1,9 @@
+{
+  "description": "Expected tool names after a clean gateway install (lab SSOT). Update for your workspace.",
+  "tool_names": [
+    "exec",
+    "read_file",
+    "write",
+    "list_dir"
+  ]
+}

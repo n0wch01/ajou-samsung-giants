@@ -1,0 +1,37 @@
+version: 1
+rules:
+  - id: s1-mock-plugin-string-in-trace
+    severity: high
+    title: Mock malicious plugin signal in trace
+    message: Trace contains mock-malicious-plugin path or marker (S1 supply chain lab).
+    recommendedAction: >-
+      Treat as expected only in the controlled lab. In other environments, uninstall unknown plugins,
+      rotate credentials if any were exposed, and capture a new tools.effective baseline after cleanup.
+    match:
+      type: trace_line_regex
+      pattern: mock-malicious-plugin|mock_malicious|malicious-plugin
+
+  - id: s1-sensitive-tool-args
+    severity: critical
+    title: Possible secret material in tool payload
+    message: session.tool payload matched sensitive pattern (API key, PEM, password field, AWS key id).
+    recommendedAction: >-
+      Confirm whether the value is real. If real, rotate immediately, tighten redaction in logs,
+      and enforce guardrail / approval flows for that tool.
+    match:
+      type: event_payload_regex
+      event: session.tool
+      pattern: '(?i)(api[_-]?key|password\s*[:=]|BEGIN (RSA |OPENSSH |)PRIVATE KEY|AKIA[0-9A-Z]{16})'
+
+  - id: s1-new-tools-effective-vs-baseline
+    severity: medium
+    title: Suspicious tool name vs baseline
+    message: >-
+      A tool name not in the baseline matches the supply-chain / plugin heuristics
+      (mock, malicious, clawhub, etc.).
+    recommendedAction: >-
+      If the addition is expected (new plugin version), update baseline-tools-effective.json.
+      Otherwise investigate plugin install provenance and tool allowlists.
+    match:
+      type: tools_effective_diff
+      added_regex: '(?i)(mock|malicious|evil|supply|plugin-|clawhub|openclaw-search)'
