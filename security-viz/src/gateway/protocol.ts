@@ -47,10 +47,23 @@ export function parseGwFrame(raw: string): GwFrame | null {
   }
 }
 
+/** Matches OpenClaw `GATEWAY_CLIENT_IDS` / `GATEWAY_CLIENT_MODES` (protocol v3). */
+const CONTROL_UI_ID = "openclaw-control-ui";
+const CONTROL_UI_MODE = "ui";
+
+function guessClientPlatform(): string {
+  if (typeof navigator === "undefined") return "macos";
+  const ua = navigator.userAgent || "";
+  const plat = navigator.platform || "";
+  if (/Win/i.test(plat) || /Windows/i.test(ua)) return "windows";
+  if (/Mac/i.test(plat) || /Mac/i.test(ua)) return "macos";
+  return "linux";
+}
+
 export function buildConnectReq(params: {
   token: string;
   scopes?: string[];
-}): GwFrame {
+}): Extract<GwFrame, { type: "req" }> {
   const id = newReqId();
   return {
     type: "req",
@@ -60,16 +73,19 @@ export function buildConnectReq(params: {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: "security-viz",
+        id: CONTROL_UI_ID,
         version: "0.1.0",
-        platform: "web",
-        mode: "operator",
+        platform: guessClientPlatform(),
+        mode: CONTROL_UI_MODE,
       },
       role: "operator",
       scopes: params.scopes ?? ["operator.read"],
+      caps: [],
+      commands: [],
+      permissions: {},
       auth: { token: params.token },
       locale: "en-US",
-      userAgent: "security-viz/0.1.0",
+      userAgent: "openclaw-control-ui/0.1.0",
     },
   };
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -24,14 +25,16 @@ def new_req_id() -> str:
 def build_connect_frame(
     *,
     token: str,
-    client_id: str,
+    client_id: str = "gateway-client",
+    client_mode: str = "backend",
     version: str = "0.1.0",
-    platform: str = "python",
-    mode: str = "operator",
+    platform: str | None = None,
     role: str = "operator",
     scopes: list[str] | None = None,
 ) -> tuple[str, dict[str, Any]]:
+    """OpenClaw v3 connect params; client.id / client.mode must match gateway enums."""
     rid = new_req_id()
+    plat = platform if platform else sys.platform
     frame: dict[str, Any] = {
         "type": "req",
         "id": rid,
@@ -42,17 +45,44 @@ def build_connect_frame(
             "client": {
                 "id": client_id,
                 "version": version,
-                "platform": platform,
-                "mode": mode,
+                "platform": plat,
+                "mode": client_mode,
             },
             "role": role,
             "scopes": scopes or ["operator.read"],
+            "caps": [],
+            "commands": [],
+            "permissions": {},
             "auth": {"token": token},
             "locale": "en-US",
             "userAgent": f"{client_id}/{version}",
         },
     }
     return rid, frame
+
+
+async def _recv_connect_challenge_nonce(ws: WebSocketClientProtocol, *, timeout_s: float = 15.0) -> str | None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=max(0.05, min(2.0, remaining)))
+        except asyncio.TimeoutError:
+            continue
+        try:
+            msg = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(msg, dict):
+            continue
+        if msg.get("type") != "event" or msg.get("event") != "connect.challenge":
+            continue
+        payload = msg.get("payload")
+        if isinstance(payload, dict):
+            n = payload.get("nonce")
+            if isinstance(n, str) and n.strip():
+                return n.strip()
+    return None
 
 
 def is_hello_ok(payload: Any) -> bool:
@@ -74,15 +104,23 @@ class GwSession:
         ws_url: str,
         *,
         token: str,
-        client_id: str,
+        client_id: str = "gateway-client",
+        client_mode: str = "backend",
         scopes: list[str] | None = None,
         open_timeout_s: float = 30.0,
     ) -> GwSession:
         ws = await websockets.connect(ws_url, max_size=None, open_timeout=open_timeout_s)
+        nonce = await _recv_connect_challenge_nonce(ws, timeout_s=15.0)
+        if not nonce:
+            await ws.close()
+            raise RuntimeError(
+                "Timed out waiting for connect.challenge from gateway "
+                "(check OPENCLAW_GATEWAY_WS_URL and gateway version)."
+            )
         self = cls(ws=ws)
         self._reader_task = asyncio.create_task(self._reader_loop())
         connect_id, connect_frame = build_connect_frame(
-            token=token, client_id=client_id, scopes=scopes
+            token=token, client_id=client_id, client_mode=client_mode, scopes=scopes
         )
         connect_fut: asyncio.Future[dict[str, Any]] = asyncio.get_running_loop().create_future()
         self._pending[connect_id] = connect_fut

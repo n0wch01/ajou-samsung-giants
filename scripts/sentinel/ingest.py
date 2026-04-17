@@ -135,12 +135,7 @@ async def _run_ingest(
         }
     )
 
-    session = await GwSession.connect(
-        ws_url,
-        token=token,
-        client_id="sg-sentinel-ingest",
-        scopes=scopes,
-    )
+    session = await GwSession.connect(ws_url, token=token, scopes=scopes)
 
     async def on_event(msg: dict[str, Any]) -> None:
         append_line(

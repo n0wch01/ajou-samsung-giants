@@ -63,7 +63,8 @@ async def _send_once(
     sess = await GwSession.connect(
         ws_url,
         token=token,
-        client_id="sg-runner-send-scenario",
+        client_id="cli",
+        client_mode="cli",
         scopes=scopes,
     )
     try:

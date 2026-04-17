@@ -137,12 +137,7 @@ async def _maybe_sessions_abort(findings: list[dict[str, Any]]) -> None:
         "[sentinel-respond] invoking sessions.abort (operator break-glass path engaged).",
         file=sys.stderr,
     )
-    sess = await GwSession.connect(
-        ws_url,
-        token=token,
-        client_id="sg-sentinel-respond-abort",
-        scopes=scopes,
-    )
+    sess = await GwSession.connect(ws_url, token=token, scopes=scopes)
     try:
         params: dict[str, Any] = {"key": session_key}
         # Some builds accept sessionKey; harmless extra keys are stripped server-side.

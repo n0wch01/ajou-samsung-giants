@@ -5,7 +5,6 @@ import {
   buildConnectReq,
   newReqId,
   parseGwFrame,
-  READONLY_METHODS,
   type GwFrame,
 } from "./protocol";
 
@@ -31,6 +30,9 @@ export function useGatewayReadonly(): UseGatewayReadonly {
   const pendingRef = useRef<Map<string, (f: GwFrame) => void>>(new Map());
   const sessionKeyRef = useRef<string>("");
   const connectReqIdRef = useRef<string | null>(null);
+  /** OpenClaw sends `connect.challenge` before `connect` is accepted. */
+  const connectSentRef = useRef(false);
+  const challengeTimerRef = useRef<number | null>(null);
 
   const [connState, setConnState] = useState<ConnState>("idle");
   const [error, setError] = useState<string | null>(null);
@@ -112,6 +114,11 @@ export function useGatewayReadonly(): UseGatewayReadonly {
   );
 
   const disconnect = useCallback(() => {
+    if (challengeTimerRef.current != null) {
+      window.clearTimeout(challengeTimerRef.current);
+      challengeTimerRef.current = null;
+    }
+    connectSentRef.current = false;
     wsRef.current?.close();
     wsRef.current = null;
     pendingRef.current.clear();
@@ -122,6 +129,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
   const connect = useCallback(
     (wsUrl: string, token: string, sessionKey: string) => {
       disconnect();
+      connectSentRef.current = false;
       sessionKeyRef.current = sessionKey.trim();
       setError(null);
       setConnState("connecting");
@@ -155,6 +163,34 @@ export function useGatewayReadonly(): UseGatewayReadonly {
         if (!frame) return;
         appendFrame(frame);
 
+        if (!connectSentRef.current && frame.type === "event" && frame.event === "connect.challenge") {
+          const payload = frame.payload as { nonce?: unknown } | undefined;
+          const nonce =
+            payload && typeof payload === "object" && typeof payload.nonce === "string"
+              ? payload.nonce.trim()
+              : "";
+          if (!nonce) {
+            setError("connect.challenge missing nonce");
+            setConnState("error");
+            socket.close();
+            return;
+          }
+          if (challengeTimerRef.current != null) {
+            window.clearTimeout(challengeTimerRef.current);
+            challengeTimerRef.current = null;
+          }
+          try {
+            const connectFrame = buildConnectReq({ token });
+            connectReqIdRef.current = connectFrame.id;
+            connectSentRef.current = true;
+            sendRaw(connectFrame);
+          } catch (e) {
+            setConnState("error");
+            setError(e instanceof Error ? e.message : "connect send failed");
+          }
+          return;
+        }
+
         if (frame.type === "res") {
           const cb = pendingRef.current.get(frame.id);
           if (cb) {
@@ -174,14 +210,17 @@ export function useGatewayReadonly(): UseGatewayReadonly {
       };
 
       socket.onopen = () => {
-        try {
-          const connectFrame = buildConnectReq({ token });
-          connectReqIdRef.current = connectFrame.id;
-          sendRaw(connectFrame);
-        } catch (e) {
-          setConnState("error");
-          setError(e instanceof Error ? e.message : "connect send failed");
+        if (challengeTimerRef.current != null) {
+          window.clearTimeout(challengeTimerRef.current);
         }
+        challengeTimerRef.current = window.setTimeout(() => {
+          challengeTimerRef.current = null;
+          if (!connectSentRef.current && wsRef.current === socket) {
+            setError("Timed out waiting for gateway connect.challenge");
+            setConnState("error");
+            socket.close();
+          }
+        }, 15_000);
       };
     },
     [appendFrame, disconnect, sendRaw],
