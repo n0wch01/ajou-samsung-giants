@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { sendScenarioChatOnce } from "../gateway/scenarioSend";
-import { SCENARIO_REGISTRY, scenarioById } from "../scenarioRegistry";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
+import { SCENARIO_REGISTRY, type ScenarioEntry } from "../scenarioRegistry";
 
 export type StageScenarioProps = {
   wsUrl: string;
@@ -24,7 +24,7 @@ function buildSendScript(props: {
   const k = escapeForDoubleQuotedShell(props.sessionKey.trim());
   const m = escapeForDoubleQuotedShell(props.message);
   return [
-    "# 터미널에서 SG 리포지토리 루트로 이동한 뒤 붙여 넣으세요. chat.send에 operator.write 스코프가 필요합니다.",
+    "# SG 리포지토리 루트에서 실행. chat.send에 operator.write 스코프가 필요합니다.",
     `export OPENCLAW_GATEWAY_WS_URL="${w}"`,
     `export OPENCLAW_GATEWAY_TOKEN="${t}"`,
     `export OPENCLAW_GATEWAY_SESSION_KEY="${k}"`,
@@ -35,178 +35,141 @@ function buildSendScript(props: {
 }
 
 export function StageScenario(props: StageScenarioProps) {
-  const [scenarioId, setScenarioId] = useState("S1");
-  const [message, setMessage] = useState(() => scenarioById("S1")?.defaultMessage ?? "");
+  const [overrideMessage, setOverrideMessage] = useState("");
   const [hint, setHint] = useState<string | null>(null);
-  const [sending, setSending] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!hint) return;
-    const id = window.setTimeout(() => setHint(null), 6500);
+    const id = window.setTimeout(() => setHint(null), 7000);
     return () => window.clearTimeout(id);
   }, [hint]);
 
-  const selected = useMemo(() => scenarioById(scenarioId), [scenarioId]);
+  const runScenario = useCallback(
+    async (entry: ScenarioEntry) => {
+      const ws = props.wsUrl.trim();
+      const tok = props.token.trim();
+      const key = props.sessionKey.trim();
+      const body = (overrideMessage.trim() || entry.defaultMessage || "").trim();
+      if (!ws || !tok || !key || !body) {
+        setHint("연결 탭에서 WebSocket URL·토큰·세션 키를 채운 뒤 다시 시도하세요.");
+        return;
+      }
+      if (entry.status !== "active") {
+        setHint("이 시나리오는 아직 planned 입니다.");
+        return;
+      }
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+      setSendingId(entry.id);
+      setHint(`${entry.id} chat.send 전송 중…`);
+      try {
+        const res = await sendScenarioThroughDevServer({
+          wsUrl: ws,
+          token: tok,
+          sessionKey: key,
+          message: body,
+          scenarioId: entry.id,
+          signal: ac.signal,
+        });
+        if (res.ok) {
+          setHint(`${entry.id} 전송 완료. 세션 탭에서 같은 세션으로 연결되어 있으면 타임라인에 반영됩니다.`);
+        } else {
+          setHint(res.message);
+        }
+      } catch (e) {
+        setHint(e instanceof Error ? e.message : String(e));
+      } finally {
+        setSendingId(null);
+        abortRef.current = null;
+      }
+    },
+    [overrideMessage, props.sessionKey, props.token, props.wsUrl],
+  );
 
-  const onPickScenario = useCallback((id: string) => {
-    setScenarioId(id);
-    const s = scenarioById(id);
-    if (s) setMessage(s.defaultMessage);
-  }, []);
-
-  const copyScript = useCallback(async () => {
-    const ws = props.wsUrl.trim();
-    const tok = props.token.trim();
-    const key = props.sessionKey.trim();
-    if (!ws || !tok || !key) {
-      setHint("위 패널에서 WebSocket URL·토큰·세션 키를 먼저 채워 주세요.");
-      return;
-    }
-    if (selected?.status !== "active") {
-      setHint("이 시나리오는 아직 planned 입니다. 메시지만 참고용으로 복사할 수 있습니다.");
-    }
-    const script = buildSendScript({
-      wsUrl: ws,
-      token: tok,
-      sessionKey: key,
-      scenarioId,
-      message: message.trim() || selected?.defaultMessage || "",
-    });
-    try {
-      await navigator.clipboard.writeText(script);
-      setHint(
-        "클립보드에 전송 스크립트를 복사했습니다. 터미널에서 SG 리포지토리 루트로 이동한 뒤 붙여 넣어 실행하세요.",
-      );
-    } catch {
-      setHint("클립보드 복사에 실패했습니다. 브라우저 권한을 확인해 주세요.");
-    }
-  }, [message, props.sessionKey, props.token, props.wsUrl, scenarioId, selected?.defaultMessage, selected?.status]);
-
-  const copyMessageOnly = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(message);
-      setHint("시나리오 메시지 본문만 복사했습니다.");
-    } catch {
-      setHint("클립보드 복사에 실패했습니다.");
-    }
-  }, [message]);
-
-  const onResetMessage = useCallback(() => {
-    if (selected) setMessage(selected.defaultMessage);
-  }, [selected]);
-
-  const onSendNow = useCallback(async () => {
-    const ws = props.wsUrl.trim();
-    const tok = props.token.trim();
-    const key = props.sessionKey.trim();
-    const body = (message.trim() || selected?.defaultMessage || "").trim();
-    if (!ws || !tok || !key || !body) {
-      setHint("WebSocket URL·토큰·세션 키·메시지를 확인해 주세요.");
-      return;
-    }
-    if (sending) return;
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setSending(true);
-    setHint("chat.send 전송 중… (별도 연결, operator.write)");
-    try {
-      const res = await sendScenarioChatOnce({
+  const copyScriptFor = useCallback(
+    async (entry: ScenarioEntry) => {
+      const ws = props.wsUrl.trim();
+      const tok = props.token.trim();
+      const key = props.sessionKey.trim();
+      if (!ws || !tok || !key) {
+        setHint("URL·토큰·세션 키를 먼저 채워 주세요.");
+        return;
+      }
+      const msg = (overrideMessage.trim() || entry.defaultMessage || "").trim();
+      const script = buildSendScript({
         wsUrl: ws,
         token: tok,
         sessionKey: key,
-        message: body,
-        signal: ac.signal,
+        scenarioId: entry.id,
+        message: msg,
       });
-      if (res.ok) {
-        setHint("전송 완료. 위에서 같은 세션으로 연결되어 있으면 채팅에 곧 반영됩니다.");
-      } else {
-        setHint(res.message);
+      try {
+        await navigator.clipboard.writeText(script);
+        setHint(`${entry.id}용 터미널 스크립트를 복사했습니다.`);
+      } catch {
+        setHint("클립보드 복사에 실패했습니다.");
       }
-    } catch (e) {
-      setHint(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSending(false);
-      abortRef.current = null;
-    }
-  }, [message, props.sessionKey, props.token, props.wsUrl, selected?.defaultMessage, sending]);
+    },
+    [overrideMessage, props.sessionKey, props.token, props.wsUrl],
+  );
+
+  const canSend = props.wsUrl.trim() && props.token.trim() && props.sessionKey.trim();
 
   return (
-    <div className="panel scenario-panel">
+    <div className="panel scenario-panel scenario-panel-v2">
       <h2>시나리오 테스트</h2>
       <p className="muted">
-        <strong>지금 전송</strong>은 메인 Viz 연결과 별도의 짧은 WebSocket으로 <code>operator.write</code> 연결 후{" "}
-        <code>chat.send</code> 한 번만 보냅니다. 토큰에 쓰기 스코프가 없으면 실패합니다. 터미널을 쓰려면 아래{" "}
-        <strong>전송 스크립트 복사</strong>를 사용하세요.
+        <strong>이 시나리오 실행</strong>은 Vite 개발 서버가 호스트에서 <code>send_scenario.py</code>를 돌려
+        <code>chat.send</code>를 보냅니다(로컬 <code>device.json</code>으로 <code>operator.write</code> 유지).{" "}
+        <code>npm run dev</code> / <code>run-viz.sh</code>가 아니면 API가 없어 실패합니다. 메시지는 아래에서 덮어쓸 수 있습니다.
       </p>
 
-      <div className="row" style={{ marginTop: 10 }}>
-        <div className="field" style={{ flex: 1 }}>
-          <label htmlFor="scen">시나리오</label>
-          <select
-            id="scen"
-            value={scenarioId}
-            onChange={(e) => onPickScenario(e.target.value)}
-          >
-            {SCENARIO_REGISTRY.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.id} — {s.title} ({s.status})
-              </option>
-            ))}
-          </select>
-        </div>
-        {selected ? (
-          <div className="field scenario-meta" style={{ flex: 2 }}>
-            <label>문서</label>
-            <span className="muted scenario-doc">{selected.docPath}</span>
-          </div>
-        ) : null}
-      </div>
-
-      <div className="field" style={{ marginTop: 10 }}>
-        <label htmlFor="scen-msg">주입할 메시지 (chat.send)</label>
+      <div className="field" style={{ marginTop: 12 }}>
+        <label htmlFor="scen-override">메시지 덮어쓰기 (선택, 비우면 각 시나리오 기본값)</label>
         <textarea
-          id="scen-msg"
+          id="scen-override"
           className="scenario-textarea"
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          rows={5}
+          rows={3}
           spellCheck={false}
-          disabled={!selected}
+          placeholder="비워 두면 카탈로그 기본 메시지로 전송됩니다."
+          value={overrideMessage}
+          onChange={(e) => setOverrideMessage(e.target.value)}
         />
       </div>
 
-      <div className="row scenario-actions" style={{ marginTop: 10 }}>
-        <button
-          type="button"
-          className="primary"
-          onClick={onSendNow}
-          disabled={
-            sending ||
-            !props.wsUrl.trim() ||
-            !props.token.trim() ||
-            !props.sessionKey.trim() ||
-            !(message.trim() || selected?.defaultMessage || "").trim()
-          }
-        >
-          {sending ? "전송 중…" : "지금 전송 (chat.send)"}
-        </button>
-        <button type="button" onClick={copyScript} disabled={!props.wsUrl.trim() || !props.token.trim() || !props.sessionKey.trim()}>
-          전송 스크립트 복사
-        </button>
-        <button type="button" onClick={copyMessageOnly}>
-          메시지만 복사
-        </button>
-        <button type="button" onClick={onResetMessage} disabled={!selected}>
-          기본 문구로 되돌리기
-        </button>
+      <div className="scenario-card-grid">
+        {SCENARIO_REGISTRY.map((s) => {
+          const active = s.status === "active";
+          const busy = sendingId === s.id;
+          return (
+            <div key={s.id} className={`scenario-card ${active ? "is-active" : "is-planned"}`}>
+              <div className="scenario-card-top">
+                <strong className="scenario-card-id">{s.id}</strong>
+                <span className={`scenario-status-pill ${s.status}`}>{s.status}</span>
+              </div>
+              <div className="scenario-card-title">{s.title}</div>
+              <code className="scenario-card-path">{s.docPath}</code>
+              <div className="row scenario-card-actions">
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={!canSend || !active || busy}
+                  onClick={() => void runScenario(s)}
+                >
+                  {busy ? "전송 중…" : "이 시나리오 실행"}
+                </button>
+                <button type="button" disabled={!canSend} onClick={() => void copyScriptFor(s)}>
+                  CLI 스크립트 복사
+                </button>
+              </div>
+            </div>
+          );
+        })}
       </div>
-      {selected?.status === "planned" ? (
-        <p className="scenario-warn">
-          이 ID는 catalog 상 <strong>planned</strong>입니다. 스크립트는 실행되지만 시나리오 SSOT 문서는 아직 없을 수 있습니다.
-        </p>
-      ) : null}
+
       {hint ? <p className="scenario-hint">{hint}</p> : null}
     </div>
   );

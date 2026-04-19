@@ -124,7 +124,7 @@ export function StageSentinel(props: StageSentinelProps) {
 
   return (
     <div className="panel sentinel-panel">
-      <h2>Sentinel ingest</h2>
+      <h2>Sentinel 수집 (ingest)</h2>
       {controlMissing ? (
         <p className="muted">
           이 제어 API는 <strong>Vite 개발 서버</strong>(<code>npm run dev</code> / <code>run-viz.sh</code>)에서만

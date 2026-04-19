@@ -4,9 +4,12 @@ OpenClaw 게이트웨이 WebSocket으로 시나리오 메시지 주입 (기본: 
 
 환경 변수:
   OPENCLAW_GATEWAY_WS_URL   (필수)
+  OPENCLAW_GATEWAY_WS_USE_SYSTEM_PROXY — 1이면 HTTP_PROXY 등 시스템 프록시 사용(기본은 비활성; 로컬 게이트웨이는 프록시 경유 시 pairing required가 날 수 있음)
   OPENCLAW_GATEWAY_TOKEN    (필수)
   OPENCLAW_GATEWAY_SESSION_KEY — 세션 key (예: agent:main)
   OPENCLAW_GATEWAY_SCOPES   — 기본 operator.write,operator.read
+    (device.json 사용 시 기기에 이미 승인된 스코프보다 넓으면 scope-upgrade로 pairing required →
+     게이트웨이와 동일 토큰으로: openclaw devices list 후 openclaw devices approve --latest 또는 requestId 지정)
   OPENCLAW_CHAT_METHOD        — 기본 chat.send (팀 게이트웨이에 맞게 변경)
   OPENCLAW_CHAT_SEND_PARAMS_JSON — 설정 시 session/message 대신 이 JSON을 그대로 사용
   OPENCLAW_SCENARIO_MESSAGE / SCENARIO_MESSAGE — 프롬프트 본문
@@ -40,11 +43,10 @@ def _build_chat_params(session_key: str, message: str) -> dict:
         if not isinstance(params, dict):
             raise ValueError("OPENCLAW_CHAT_SEND_PARAMS_JSON must be a JSON object")
         return params
+    # OpenClaw ChatSendParamsSchema: sessionKey, message, idempotencyKey (+ optional fields only).
     params = {
-        "key": session_key,
         "sessionKey": session_key,
         "message": message,
-        "text": message,
     }
     # Idempotency for side-effecting RPCs (OpenClaw gateway policy)
     params.setdefault("idempotencyKey", new_req_id())
@@ -60,11 +62,13 @@ async def _send_once(
     chat_method: str,
     scopes: list[str],
 ) -> dict:
+    # gateway-client + backend: loopback + shared token에서 페어링 생략(ingest와 동일).
+    # cli/cli는 OpenClaw가 별도 페어링을 요구할 수 있음.
     sess = await GwSession.connect(
         ws_url,
         token=token,
-        client_id="cli",
-        client_mode="cli",
+        client_id="gateway-client",
+        client_mode="backend",
         scopes=scopes,
     )
     try:

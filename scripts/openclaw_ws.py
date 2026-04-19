@@ -8,12 +8,24 @@ Optional device identity (same shape as OpenClaw CLI ``identity/device.json``) l
 ``operator.read``) for ``sessions.messages.subscribe``. Paths: env
 ``OPENCLAW_DEVICE_IDENTITY_PATH``, then ``$OPENCLAW_STATE_DIR/identity/device.json``,
 ``~/.openclaw/identity/device.json``, ``~/.clawdbot/identity/device.json``.
+
+If the device was paired with fewer scopes than you request (e.g. paired with
+``operator.read`` only but ``OPENCLAW_GATEWAY_SCOPES`` includes ``operator.write``),
+the gateway emits ``pairing required`` (scope-upgrade) until you approve the upgrade:
+run ``openclaw devices list``, then ``openclaw devices approve <requestId>`` or
+``openclaw devices approve --latest`` (same token/URL as the gateway).
+
+WebSocket: by default the client does **not** use the system HTTP proxy (``websockets``
+defaults to ``proxy=True``, which breaks loopback pairing when ``HTTP_PROXY`` /
+``ALL_PROXY`` is set). Set ``OPENCLAW_GATEWAY_WS_USE_SYSTEM_PROXY=1`` to restore
+proxy-based connections.
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import inspect
 import json
 import os
 import sys
@@ -31,6 +43,11 @@ from websockets.client import WebSocketClientProtocol
 
 def new_req_id() -> str:
     return str(uuid.uuid4())
+
+
+def _ws_connect_use_system_proxy() -> bool:
+    v = os.environ.get("OPENCLAW_GATEWAY_WS_USE_SYSTEM_PROXY", "").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 def _b64url(data: bytes) -> str:
@@ -147,6 +164,51 @@ def resolve_device_identity_path(explicit: str | None) -> Path | None:
         if p.is_file():
             return p
     return None
+
+
+def _format_gateway_connect_failure(err: Any) -> str:
+    """Human-readable connect error; includes hints for common gateway cases."""
+    if not isinstance(err, dict):
+        return str(err)
+    base = err.get("message") or err.get("code") or json.dumps(err, ensure_ascii=False)
+    details = err.get("details")
+    reason: str | None = None
+    request_id: str | None = None
+    if isinstance(details, dict):
+        r = details.get("reason")
+        if isinstance(r, str) and r.strip():
+            reason = r.strip()
+        rid = details.get("requestId")
+        if isinstance(rid, str) and rid.strip():
+            request_id = rid.strip()
+    hints: list[str] = []
+    if reason == "scope-upgrade":
+        hints.append(
+            "scope-upgrade: device is paired with fewer scopes than OPENCLAW_GATEWAY_SCOPES. "
+            "Approve the pending request: openclaw devices list, then "
+            "openclaw devices approve <requestId> (or openclaw devices approve --latest)."
+        )
+    elif reason == "role-upgrade":
+        hints.append(
+            "role-upgrade: approve the device pairing request in OpenClaw, or adjust "
+            "the connect role to match the paired device."
+        )
+    elif reason == "metadata-upgrade":
+        hints.append(
+            "metadata-upgrade: approve the device pairing request in OpenClaw, or align "
+            "OPENCLAW_GATEWAY_DEVICE_FAMILY / platform with the paired device record."
+        )
+    elif reason == "not-paired":
+        hints.append(
+            "not-paired: approve device pairing in OpenClaw, or fix loopback/proxy "
+            "(see OPENCLAW_GATEWAY_WS_USE_SYSTEM_PROXY) for gateway-client/backend."
+        )
+    parts = [str(base)]
+    if hints:
+        parts.append(hints[0])
+    if request_id:
+        parts.append(f"(requestId={request_id})")
+    return " ".join(parts)
 
 
 def build_device_block_for_connect(
@@ -278,7 +340,13 @@ class GwSession:
         open_timeout_s: float = 30.0,
         device_identity_path: str | None = None,
     ) -> GwSession:
-        ws = await websockets.connect(ws_url, max_size=None, open_timeout=open_timeout_s)
+        # Direct connection by default so localhost peers stay loopback (OpenClaw
+        # gateway-client/backend pairing skip). System proxy would tunnel and make
+        # the server see a non-loopback address → "pairing required".
+        connect_kw: dict[str, Any] = {"max_size": None, "open_timeout": open_timeout_s}
+        if "proxy" in inspect.signature(websockets.connect).parameters:
+            connect_kw["proxy"] = True if _ws_connect_use_system_proxy() else None
+        ws = await websockets.connect(ws_url, **connect_kw)
         nonce = await _recv_connect_challenge_nonce(ws, timeout_s=15.0)
         if not nonce:
             await ws.close()
@@ -324,7 +392,7 @@ class GwSession:
             self._pending.pop(connect_id, None)
         if not res.get("ok"):
             err = res.get("error") or {}
-            msg = err.get("message") or err.get("code") or json.dumps(err)
+            msg = _format_gateway_connect_failure(err)
             await self.close()
             raise RuntimeError(f"connect failed: {msg}")
         if not is_hello_ok(res.get("payload")):

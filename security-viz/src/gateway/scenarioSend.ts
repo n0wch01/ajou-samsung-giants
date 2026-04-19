@@ -1,8 +1,8 @@
 import { buildConnectReq, newReqId, parseGwFrame, type GwFrame } from "./protocol";
 
-/** `send_scenario.py`와 동일한 게이트웨이 클라이언트 표시 */
-const SCENARIO_CLIENT_ID = "cli";
-const SCENARIO_CLIENT_MODE = "cli";
+/** 로컬 루프백에서 ingest/send_scenario와 동일한 클라이언트(페어링 생략 정책 정렬). */
+const SCENARIO_CLIENT_ID = "gateway-client";
+const SCENARIO_CLIENT_MODE = "backend";
 
 const DEFAULT_CHAT_METHOD = import.meta.env.VITE_SG_CHAT_METHOD?.trim() || "chat.send";
 
@@ -12,10 +12,8 @@ function isHelloOk(payload: unknown): boolean {
 
 function buildChatSendParams(sessionKey: string, message: string): Record<string, unknown> {
   return {
-    key: sessionKey,
     sessionKey,
     message,
-    text: message,
     idempotencyKey: newReqId(),
   };
 }
@@ -187,4 +185,68 @@ export function sendScenarioChatOnce(opts: {
       }
     };
   });
+}
+
+/**
+ * Vite 개발 서버의 `POST /api/scenario/send`로 `send_scenario.py`를 실행합니다.
+ * 호스트의 `~/.openclaw/identity/device.json` 등으로 connect에 device 서명이 붙어
+ * `operator.write`가 유지됩니다. 브라우저 WebSocket만으로는 동일하게 할 수 없습니다.
+ */
+export async function sendScenarioThroughDevServer(opts: {
+  wsUrl: string;
+  token: string;
+  sessionKey: string;
+  message: string;
+  scenarioId: string;
+  chatMethod?: string;
+  signal?: AbortSignal;
+}): Promise<ScenarioSendResult> {
+  if (opts.signal?.aborted) {
+    return { ok: false, message: "취소됨" };
+  }
+  try {
+    const res = await fetch("/api/scenario/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: opts.signal,
+      body: JSON.stringify({
+        wsUrl: opts.wsUrl.trim(),
+        token: opts.token.trim(),
+        sessionKey: opts.sessionKey.trim(),
+        message: opts.message.trim(),
+        scenarioId: opts.scenarioId.trim(),
+        chatMethod: opts.chatMethod?.trim() || undefined,
+      }),
+    });
+    let j: unknown;
+    try {
+      j = await res.json();
+    } catch {
+      return {
+        ok: false,
+        message:
+          "시나리오 API 응답을 JSON으로 읽을 수 없습니다. `npm run dev` 또는 `run-viz.sh`로 띄운 개발 서버에서 시도하세요.",
+      };
+    }
+    if (res.status === 404) {
+      return {
+        ok: false,
+        message:
+          "시나리오 전송 API가 없습니다. Vite 개발 서버(`npm run dev` / `run-viz.sh`)에서만 사용할 수 있습니다. 또는 터미널에서 `send_scenario.py`를 실행하세요.",
+      };
+    }
+    const rec = j as { ok?: boolean; message?: string; gateway?: unknown };
+    if (!rec.ok) {
+      return {
+        ok: false,
+        message: rec.message ?? `시나리오 전송 실패 (HTTP ${res.status})`,
+      };
+    }
+    return { ok: true, payload: rec.gateway ?? j };
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      return { ok: false, message: "취소됨" };
+    }
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
 }
