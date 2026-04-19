@@ -16,6 +16,8 @@ Python **Sentinel**는 OpenClaw 게이트웨이 WebSocket을 구독해 **행위 
 - `OPENCLAW_GATEWAY_TOKEN` — 연결 `connect` 시 `auth.token`.
 - `OPENCLAW_GATEWAY_SESSION_KEY` — `sessions.messages.subscribe` 및 러너 `chat.send` 등에 사용하는 세션 식별자.
 - `OPENCLAW_GATEWAY_SCOPES` — 쉼표 구분 스코프. ingest 기본 `operator.read`, 러너 기본 `operator.write,operator.read`.
+- **`OPENCLAW_DEVICE_IDENTITY_PATH`** (선택) — OpenClaw CLI와 동일한 `identity/device.json`(PEM 키) 경로. Python `openclaw_ws`가 `connect`에 **`device` v3 서명**을 붙여 게이트웨이가 스코프를 비우지 않게 한다. 미설정이면 `$OPENCLAW_STATE_DIR/identity/device.json` → `~/.openclaw/identity/device.json` → `~/.clawdbot/identity/device.json` 순으로 존재하는 파일을 자동 사용한다. **없으면** 공유 토큰만으로 연결되어 `sessions.messages.subscribe`에서 `missing scope: operator.read`가 날 수 있다.
+- `OPENCLAW_GATEWAY_DEVICE_FAMILY` (선택) — `connect`의 `client.deviceFamily` 및 서명 페이로드에 쓸 문자열.
 
 ## 오탐(false positive)과 운영 주의
 

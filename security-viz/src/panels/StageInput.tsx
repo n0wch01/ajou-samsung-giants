@@ -4,11 +4,9 @@ export type StageInputProps = {
   wsUrl: string;
   token: string;
   sessionKey: string;
-  scenarioId: string;
   onChangeWsUrl: (v: string) => void;
   onChangeToken: (v: string) => void;
   onChangeSessionKey: (v: string) => void;
-  onChangeScenarioId: (v: string) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   connState: ConnState;
@@ -20,23 +18,14 @@ export function StageInput(props: StageInputProps) {
   const live = props.connState === "ready";
   return (
     <div className="panel">
-      <h2>1. Intent and input</h2>
+      <h2>OpenClaw gateway</h2>
       <p className="muted">
-        Read-only operator scope: subscribe to session transcript events, fetch <code>config.get</code>, and
-        optionally refresh <code>tools.catalog</code>. No <code>chat.send</code> or <code>sessions.abort</code>.
+        Read-only: subscribes to <code>sessions.subscribe</code> and <code>sessions.messages.subscribe</code> for the
+        session below. Does not send chat or abort sessions.
       </p>
       <div className="row" style={{ marginTop: 10 }}>
-        <div className="field">
-          <label htmlFor="scenario">Scenario</label>
-          <input
-            id="scenario"
-            value={props.scenarioId}
-            onChange={(e) => props.onChangeScenarioId(e.target.value)}
-            placeholder="S1-plugin-supply-chain"
-          />
-        </div>
         <div className="field" style={{ flex: 2 }}>
-          <label htmlFor="ws">Gateway WebSocket URL</label>
+          <label htmlFor="ws">WebSocket URL</label>
           <input
             id="ws"
             value={props.wsUrl}
@@ -71,7 +60,7 @@ export function StageInput(props: StageInputProps) {
       </div>
       <div className="row" style={{ marginTop: 10 }}>
         <button type="button" className="primary" disabled={busy} onClick={props.onConnect}>
-          {busy ? "Connecting…" : "Connect (read-only)"}
+          {busy ? "Connecting…" : "Connect"}
         </button>
         <button type="button" disabled={!live && !busy} onClick={props.onDisconnect}>
           Disconnect

@@ -241,18 +241,25 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     let cancelled = false;
     void (async () => {
       try {
-        await sendReadonly("sessions.messages.subscribe", { key });
-        if (!cancelled) pushSynthetic("subscribed", `sessions.messages.subscribe key=${key}`);
+        /* 대시보드 타임라인의 도구 이벤트는 messages 전용 스트림에 없을 수 있어 세션 구독도 시도한다. */
+        await sendReadonly("sessions.subscribe", { key });
       } catch (e) {
         if (!cancelled) {
-          pushSynthetic("subscribe failed", e instanceof Error ? e.message : String(e));
+          pushSynthetic(
+            "sessions.subscribe failed",
+            e instanceof Error ? e.message : String(e),
+          );
         }
       }
       try {
-        const cfg = await sendReadonly("config.get", {});
-        if (!cancelled) pushSynthetic("config.get", cfg);
-      } catch {
-        /* optional */
+        await sendReadonly("sessions.messages.subscribe", { key });
+      } catch (e) {
+        if (!cancelled) {
+          pushSynthetic(
+            "sessions.messages.subscribe failed",
+            e instanceof Error ? e.message : String(e),
+          );
+        }
       }
     })();
     return () => {

@@ -1,15 +1,7 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { sentinelControlPlugin } from "./vite-plugin-sentinel";
 
 export default defineConfig({
-  plugins: [react()],
-  server: {
-    proxy: {
-      "/sentinel-api": {
-        target: "http://127.0.0.1:8787",
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/sentinel-api/, ""),
-      },
-    },
-  },
+  plugins: [react(), sentinelControlPlugin()],
 });

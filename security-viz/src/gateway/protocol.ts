@@ -63,6 +63,9 @@ function guessClientPlatform(): string {
 export function buildConnectReq(params: {
   token: string;
   scopes?: string[];
+  /** 기본: 대시보드 읽기 전용. 시나리오 전송 등은 별도 id/mode로 두 번째 연결을 열 수 있음 */
+  clientId?: string;
+  clientMode?: string;
 }): Extract<GwFrame, { type: "req" }> {
   const id = newReqId();
   return {
@@ -73,10 +76,10 @@ export function buildConnectReq(params: {
       minProtocol: 3,
       maxProtocol: 3,
       client: {
-        id: CONTROL_UI_ID,
+        id: params.clientId ?? CONTROL_UI_ID,
         version: "0.1.0",
         platform: guessClientPlatform(),
-        mode: CONTROL_UI_MODE,
+        mode: params.clientMode ?? CONTROL_UI_MODE,
       },
       role: "operator",
       scopes: params.scopes ?? ["operator.read"],
