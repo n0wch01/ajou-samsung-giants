@@ -1,8 +1,8 @@
 # End to End AI Agent 보안 가시화 (COONTEC Co., Ltd.)
 
 <p align="center">
-  <img src="chitoclaw1.png" alt="치토와 치토클로 — 야구장 액션 비주얼" width="49%" />
-  <img src="chitoclaw2.png" alt="치토와 치토클로 — 키 프레젠트 비주얼" width="49%" />
+  <img src="photo/chitoclaw1.png" alt="치토와 치토클로 — 야구장 액션 비주얼" width="49%" />
+  <img src="photo/chitoclaw2.png" alt="치토와 치토클로 — 키 프레젠트 비주얼" width="49%" />
 </p>
 
 ---
