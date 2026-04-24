@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { publicAsset } from "./lib/publicAsset";
 import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
@@ -28,6 +29,8 @@ export function App() {
 
   const [configPayload, setConfigPayload] = useState<unknown>(undefined);
   const [catalogPayload, setCatalogPayload] = useState<unknown>(undefined);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   const [policyBusy, setPolicyBusy] = useState(false);
 
   const onConnect = useCallback(() => {
@@ -39,11 +42,12 @@ export function App() {
 
   const onRefreshConfig = useCallback(async () => {
     setPolicyBusy(true);
+    setConfigError(null);
     try {
       const res = await gw.sendReadonly("config.get", {});
       setConfigPayload(res);
-    } catch {
-      /* ignore — user sees stale value */
+    } catch (e) {
+      setConfigError(e instanceof Error ? e.message : String(e));
     } finally {
       setPolicyBusy(false);
     }
@@ -51,11 +55,12 @@ export function App() {
 
   const onRefreshCatalog = useCallback(async () => {
     setPolicyBusy(true);
+    setCatalogError(null);
     try {
-      const res = await gw.sendReadonly("tools.catalog", {});
+      const res = await gw.sendReadonly("tools.catalog", { includePlugins: true });
       setCatalogPayload(res);
-    } catch {
-      /* ignore */
+    } catch (e) {
+      setCatalogError(e instanceof Error ? e.message : String(e));
     } finally {
       setPolicyBusy(false);
     }
@@ -65,9 +70,11 @@ export function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
-          <img src="/sgchito.png" alt="chito" className="app-header-chito" />
+          <div className="app-header-chito-wrap">
+            <img src={publicAsset("sgclaw_nobg.png")} alt="sgclaw" className="app-header-chito" />
+          </div>
           <div>
-            <h1>security-viz</h1>
+            <h1>SG-ClawWatch</h1>
           </div>
         </div>
       </header>
@@ -143,6 +150,8 @@ export function App() {
             <StagePolicy
               configPayload={configPayload}
               catalogPayload={catalogPayload}
+              configError={configError}
+              catalogError={catalogError}
               onRefreshConfig={() => void onRefreshConfig()}
               onRefreshCatalog={() => void onRefreshCatalog()}
               busy={policyBusy}
@@ -152,7 +161,7 @@ export function App() {
           <section className="tab-panel" role="tabpanel" hidden={tab !== "sentinel"}>
             <div className="sentinel-tab-stack">
               <StageSentinel wsUrl={wsUrl} token={token} sessionKey={sessionKey} />
-              <StageSentinelDetect />
+              <StageSentinelDetect wsUrl={wsUrl} token={token} />
             </div>
           </section>
         </main>

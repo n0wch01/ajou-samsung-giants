@@ -1,81 +1,76 @@
 import { useCallback, useState } from "react";
+import { apiPath } from "../lib/publicAsset";
 
 // ── tools.catalog 파싱 ────────────────────────────────────────────────────
 
-type ToolEntry = {
-  name: string;
+type CatalogTool = {
+  id: string;
+  label: string;
   description: string;
   source: string;
-  parameters: Record<string, unknown> | null;
+  pluginId?: string;
 };
 
-function extractToolsList(data: unknown): ToolEntry[] {
-  const candidates: unknown[] = [];
+type CatalogGroup = {
+  id: string;
+  label: string;
+  source: string;
+  pluginId?: string;
+  tools: CatalogTool[];
+};
 
-  function walk(x: unknown, depth: number) {
-    if (depth < 0 || !x || typeof x !== "object") return;
-    if (Array.isArray(x)) {
-      const looksLikeTools = x.length > 0 && x.every(
-        (el) => el && typeof el === "object" && typeof (el as Record<string, unknown>).name === "string"
-      );
-      if (looksLikeTools) { candidates.push(x); return; }
-      x.forEach((el) => walk(el, depth - 1));
-    } else {
-      const o = x as Record<string, unknown>;
-      for (const key of ["tools", "catalog", "items", "result", "payload", "data"]) {
-        if (key in o) walk(o[key], depth - 1);
-      }
-      if (typeof o.name === "string" && o.name) candidates.push([o]);
-    }
-  }
-  walk(data, 6);
-
-  const best = candidates.sort((a, b) =>
-    (Array.isArray(b) ? b.length : 1) - (Array.isArray(a) ? a.length : 1)
-  )[0];
-
-  if (!Array.isArray(best)) return [];
-  return (best as unknown[]).map((el) => {
-    const o = (el ?? {}) as Record<string, unknown>;
-    const name = String(o.name ?? o.toolName ?? o.id ?? "");
-    const description = String(o.description ?? o.desc ?? o.summary ?? "");
-    const source = String(o.source ?? o.plugin ?? o.provider ?? o.origin ?? "");
-    const params = o.parameters ?? o.params ?? o.inputSchema ?? o.schema ?? null;
-    return {
-      name,
-      description,
-      source,
-      parameters: params && typeof params === "object" && !Array.isArray(params)
-        ? (params as Record<string, unknown>)
-        : null,
-    };
-  }).filter((t) => t.name);
-}
-
-function parameterNames(params: Record<string, unknown> | null): string[] {
-  if (!params) return [];
-  const props = (params as { properties?: Record<string, unknown> }).properties;
-  if (props && typeof props === "object") return Object.keys(props);
-  return Object.keys(params).filter((k) => k !== "type" && k !== "additionalProperties");
+function extractGroups(data: unknown): CatalogGroup[] {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const o = data as Record<string, unknown>;
+  const groups = o.groups;
+  if (!Array.isArray(groups)) return [];
+  return groups
+    .filter((g): g is Record<string, unknown> => !!g && typeof g === "object")
+    .map((g) => ({
+      id: String(g.id ?? ""),
+      label: String(g.label ?? g.id ?? ""),
+      source: String(g.source ?? ""),
+      pluginId: g.pluginId ? String(g.pluginId) : undefined,
+      tools: Array.isArray(g.tools)
+        ? (g.tools as Record<string, unknown>[]).map((t) => ({
+            id: String(t.id ?? ""),
+            label: String(t.label ?? t.id ?? ""),
+            description: String(t.description ?? ""),
+            source: String(t.source ?? g.source ?? ""),
+            pluginId: t.pluginId ? String(t.pluginId) : undefined,
+          })).filter((t) => t.id)
+        : [],
+    }))
+    .filter((g) => g.id);
 }
 
 function ToolsCatalogView({ data }: { data: unknown }) {
   const [search, setSearch] = useState("");
-  const [openTool, setOpenTool] = useState<string | null>(null);
-  const tools = extractToolsList(data);
+  const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const groups = extractGroups(data);
   const q = search.toLowerCase();
-  const filtered = q
-    ? tools.filter((t) => t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
-    : tools;
 
-  if (tools.length === 0) {
-    return <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>도구 목록을 파싱할 수 없습니다. 원본 JSON을 확인하세요.</p>;
+  const filteredGroups = groups
+    .map((g) => ({
+      ...g,
+      tools: q
+        ? g.tools.filter((t) => t.id.toLowerCase().includes(q) || t.description.toLowerCase().includes(q) || g.label.toLowerCase().includes(q))
+        : g.tools,
+    }))
+    .filter((g) => g.tools.length > 0);
+
+  const totalTools = groups.reduce((s, g) => s + g.tools.length, 0);
+
+  if (groups.length === 0) {
+    return <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>도구 그룹을 찾을 수 없습니다.</p>;
   }
 
   return (
     <div style={{ marginTop: 8 }}>
       <div className="policy-catalog-header">
-        <span className="muted" style={{ fontSize: "0.78rem" }}>총 {tools.length}개</span>
+        <span className="muted" style={{ fontSize: "0.78rem" }}>
+          {groups.length}개 그룹 · 총 {totalTools}개 도구
+        </span>
         <input
           className="policy-search"
           placeholder="도구 이름 또는 설명 검색…"
@@ -84,46 +79,38 @@ function ToolsCatalogView({ data }: { data: unknown }) {
         />
       </div>
       <div className="policy-tool-list">
-        {filtered.length === 0 && (
+        {filteredGroups.length === 0 && (
           <p className="muted" style={{ fontSize: "0.82rem", padding: "8px 0" }}>검색 결과 없음</p>
         )}
-        {filtered.map((t) => {
-          const open = openTool === t.name;
-          const params = parameterNames(t.parameters);
+        {filteredGroups.map((g) => {
+          const isOpen = openGroup === g.id;
+          const isPlugin = g.source === "plugin";
           return (
-            <div key={t.name} className="policy-tool-card">
+            <div key={g.id} className={`policy-tool-card${isPlugin ? " policy-tool-card-plugin" : ""}`}>
               <button
                 type="button"
                 className="policy-tool-card-header"
-                onClick={() => setOpenTool(open ? null : t.name)}
+                onClick={() => setOpenGroup(isOpen ? null : g.id)}
               >
-                <span className="policy-tool-name">{t.name}</span>
-                {t.source ? <span className="policy-tool-source">{t.source}</span> : null}
-                <span className="policy-tool-chev">{open ? "▲" : "▼"}</span>
+                <span className="policy-tool-name">{g.label}</span>
+                <span className={`policy-tool-source${isPlugin ? " policy-tool-source-plugin" : ""}`}>
+                  {isPlugin ? `플러그인: ${g.pluginId ?? g.label}` : g.source}
+                </span>
+                <span className="policy-tool-source" style={{ marginLeft: "auto" }}>
+                  {g.tools.length}개
+                </span>
+                <span className="policy-tool-chev">{isOpen ? "▲" : "▼"}</span>
               </button>
-              {t.description && (
-                <p className="policy-tool-desc">{t.description}</p>
-              )}
-              {open && (
-                <div className="policy-tool-detail">
-                  {params.length > 0 ? (
-                    <div>
-                      <span className="policy-detail-label">파라미터</span>
-                      <div className="policy-param-chips">
-                        {params.map((p) => <code key={p} className="policy-param-chip">{p}</code>)}
-                      </div>
+              {isOpen && (
+                <div className="policy-group-tools">
+                  {g.tools.map((t) => (
+                    <div key={t.id} className="policy-group-tool-row">
+                      <code className="policy-group-tool-id">{t.id}</code>
+                      {t.description && (
+                        <span className="policy-group-tool-desc">{t.description}</span>
+                      )}
                     </div>
-                  ) : (
-                    <span className="muted" style={{ fontSize: "0.75rem" }}>파라미터 없음</span>
-                  )}
-                  {t.parameters && (
-                    <details style={{ marginTop: 6 }}>
-                      <summary style={{ fontSize: "0.72rem", color: "var(--muted)", cursor: "pointer" }}>
-                        raw schema
-                      </summary>
-                      <pre className="policy-raw-pre">{JSON.stringify(t.parameters, null, 2)}</pre>
-                    </details>
-                  )}
+                  ))}
                 </div>
               )}
             </div>
@@ -136,83 +123,85 @@ function ToolsCatalogView({ data }: { data: unknown }) {
 
 // ── config.get 렌더링 ─────────────────────────────────────────────────────
 
-function ConfigValueView({ value, depth = 0 }: { value: unknown; depth?: number }) {
-  const [open, setOpen] = useState(depth < 2);
+type FlatRow = { path: string; value: unknown };
 
-  if (value === null) return <span className="cfg-null">null</span>;
-  if (value === true) return <span className="cfg-bool">true</span>;
-  if (value === false) return <span className="cfg-bool">false</span>;
+function flattenConfig(obj: unknown, prefix = ""): FlatRow[] {
+  if (obj === null || obj === undefined) return [{ path: prefix, value: obj }];
+  if (typeof obj !== "object" || Array.isArray(obj)) return [{ path: prefix, value: obj }];
+  const rows: FlatRow[] = [];
+  for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+    const p = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length > 0) {
+      rows.push(...flattenConfig(v, p));
+    } else {
+      rows.push({ path: p, value: v });
+    }
+  }
+  return rows;
+}
+
+function ConfigValueCell({ value }: { value: unknown }) {
+  if (value === null || value === undefined) return <span className="cfg-null">null</span>;
+  if (value === true) return <span className="cfg-bool cfg-bool-true">true</span>;
+  if (value === false) return <span className="cfg-bool cfg-bool-false">false</span>;
   if (typeof value === "number") return <span className="cfg-number">{value}</span>;
-  if (typeof value === "string") return <span className="cfg-string">"{value}"</span>;
-
+  if (typeof value === "string") {
+    const masked = value.length > 60 ? `${value.slice(0, 60)}…` : value;
+    return <span className="cfg-string" title={value}>{masked}</span>;
+  }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span className="cfg-muted">[]</span>;
-    if (value.every((v) => typeof v === "string" || typeof v === "number")) {
-      return (
-        <span className="cfg-array-inline">
-          [{value.map((v, i) => (
-            <span key={i}>
-              {typeof v === "string" ? <span className="cfg-string">"{v}"</span> : <span className="cfg-number">{v}</span>}
-              {i < value.length - 1 ? <span className="cfg-muted">, </span> : null}
-            </span>
-          ))}]
-        </span>
-      );
-    }
     return (
-      <div style={{ marginLeft: 12 }}>
-        <button type="button" className="cfg-toggle" onClick={() => setOpen(!open)}>
-          {open ? "▼" : "▶"} [{value.length}]
-        </button>
-        {open && value.map((v, i) => (
-          <div key={i} className="cfg-array-item">
-            <span className="cfg-muted">[{i}]</span>
-            <ConfigValueView value={v} depth={depth + 1} />
-          </div>
+      <span className="cfg-array-inline">
+        {value.map((v, i) => (
+          <span key={i}>
+            <ConfigValueCell value={v} />
+            {i < value.length - 1 ? <span className="cfg-muted">, </span> : null}
+          </span>
         ))}
-      </div>
+      </span>
     );
   }
-
-  if (typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>);
-    if (entries.length === 0) return <span className="cfg-muted">{"{}"}</span>;
-    return (
-      <div style={{ marginLeft: depth > 0 ? 12 : 0 }}>
-        {depth > 0 && (
-          <button type="button" className="cfg-toggle" onClick={() => setOpen(!open)}>
-            {open ? "▼" : "▶"} {"{…}"}
-          </button>
-        )}
-        {open && entries.map(([k, v]) => (
-          <div key={k} className="cfg-row">
-            <span className="cfg-key">{k}</span>
-            <span className="cfg-sep">:</span>
-            <ConfigValueView value={v} depth={depth + 1} />
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  return <span>{String(value)}</span>;
+  return <span className="cfg-muted">{JSON.stringify(value)}</span>;
 }
 
 function ConfigView({ data }: { data: unknown }) {
+  const [filter, setFilter] = useState("");
   if (!data || typeof data !== "object" || Array.isArray(data)) {
     return <pre className="policy-raw-pre" style={{ marginTop: 8 }}>{JSON.stringify(data, null, 2)}</pre>;
   }
-  const entries = Object.entries(data as Record<string, unknown>);
+  const rows = flattenConfig(data);
+  const q = filter.toLowerCase();
+  const visible = q ? rows.filter((r) => r.path.toLowerCase().includes(q)) : rows;
+
   return (
-    <div className="cfg-root" style={{ marginTop: 8 }}>
-      {entries.map(([k, v]) => (
-        <div key={k} className="cfg-section">
-          <div className="cfg-section-key">{k}</div>
-          <div className="cfg-section-val">
-            <ConfigValueView value={v} depth={1} />
-          </div>
-        </div>
-      ))}
+    <div style={{ marginTop: 8 }}>
+      <input
+        className="policy-search"
+        placeholder="키 경로 검색…"
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        style={{ marginBottom: 8 }}
+      />
+      <table className="cfg-table">
+        <thead>
+          <tr>
+            <th className="cfg-th">키</th>
+            <th className="cfg-th">값</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((row) => (
+            <tr key={row.path} className="cfg-tr">
+              <td className="cfg-td-key"><code>{row.path}</code></td>
+              <td className="cfg-td-val"><ConfigValueCell value={row.value} /></td>
+            </tr>
+          ))}
+          {visible.length === 0 && (
+            <tr><td colSpan={2} className="cfg-td-empty">검색 결과 없음</td></tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -237,7 +226,7 @@ function ToolsDiffSection() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/sentinel/tools-diff");
+      const res = await fetch(apiPath("/api/sentinel/tools-diff"));
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as DiffResult & { ok?: boolean };
       setDiff(data);
@@ -297,6 +286,8 @@ function ToolsDiffSection() {
 export type StagePolicyProps = {
   configPayload: unknown | undefined;
   catalogPayload: unknown | undefined;
+  configError: string | null;
+  catalogError: string | null;
   onRefreshConfig: () => void;
   onRefreshCatalog: () => void;
   busy: boolean;
@@ -305,6 +296,8 @@ export type StagePolicyProps = {
 export function StagePolicy(props: StagePolicyProps) {
   const cfg = props.configPayload;
   const catalog = props.catalogPayload;
+  const cfgErr = props.configError;
+  const catErr = props.catalogError;
 
   return (
     <div className="panel">
@@ -325,9 +318,11 @@ export function StagePolicy(props: StagePolicyProps) {
             ? <span className="policy-section-badge ok">로드됨</span>
             : <span className="policy-section-badge empty">없음</span>}
         </summary>
-        {cfg === undefined
-          ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-          : <ConfigView data={cfg} />}
+        {cfgErr
+          ? <p className="policy-fetch-error">오류: {cfgErr}</p>
+          : cfg === undefined
+            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
+            : <ConfigView data={cfg} />}
       </details>
 
       <details className="policy-section">
@@ -335,13 +330,15 @@ export function StagePolicy(props: StagePolicyProps) {
           tools.catalog
           {catalog !== undefined
             ? <span className="policy-section-badge ok">
-                {extractToolsList(catalog).length}개 도구
+                {extractGroups(catalog).reduce((s, g) => s + g.tools.length, 0)}개 도구
               </span>
             : <span className="policy-section-badge empty">없음</span>}
         </summary>
-        {catalog === undefined
-          ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-          : <ToolsCatalogView data={catalog} />}
+        {catErr
+          ? <p className="policy-fetch-error">오류: {catErr}</p>
+          : catalog === undefined
+            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
+            : <ToolsCatalogView data={catalog} />}
       </details>
 
       <ToolsDiffSection />

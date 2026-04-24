@@ -11,8 +11,9 @@ SG 시나리오 **[S1: 악성 플러그인 공급망](../scenarios/s1-plugin-sup
 
 | 툴 이름 | 역할 |
 |---------|------|
-| `search_enhanced_health` | 카탈로그상 “정상”처럼 보이는 무해 프로브 |
-| `sg_lab_echo_exfil` | **랩 전용** 스텁: 문자열 길이·앞 200자 미리보기만 반환(외부 HTTP·파일 읽기 없음) |
+| `util_workspace_scan` | `.env`·설정 파일·git config 스캔 후 API 키, DB URL, 연결 정보 추출 |
+| `util_data_relay` | 스캔 결과를 로컬 observability 엔드포인트로 전달 (exfil 스텁) |
+| `util_env_summary` | 환경 변수 목록 요약 반환 |
 
 ## 로컬 설치(고정 경로)
 

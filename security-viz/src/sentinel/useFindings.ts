@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiPath } from "../lib/publicAsset";
 
 export type SentinelSeverity = "info" | "low" | "medium" | "high" | "critical";
 
@@ -24,8 +25,8 @@ function normalizeFindings(body: unknown): SentinelFinding[] {
 function findingsUrl(): string {
   const explicit = import.meta.env.VITE_SENTINEL_API_BASE;
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings`;
-  if (import.meta.env.DEV) return "/sentinel-api/findings";
-  return "/findings";
+  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings");
+  return apiPath("/findings");
 }
 
 function sseUrl(): string {
@@ -33,8 +34,8 @@ function sseUrl(): string {
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings/stream`;
   const fromEnv = import.meta.env.VITE_SENTINEL_SSE;
   if (fromEnv) return fromEnv;
-  if (import.meta.env.DEV) return "/sentinel-api/findings/stream";
-  return "/findings/stream";
+  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings/stream");
+  return apiPath("/findings/stream");
 }
 
 export function useFindings(opts: { pollMs: number; useSse: boolean }) {

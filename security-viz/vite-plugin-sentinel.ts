@@ -222,6 +222,63 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        if (url === "/api/scenario/plugin-manage" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const action = String(body.action ?? "").trim();
+          const pluginId = String(body.pluginId ?? "workspace-utils").trim();
+          if (!["install", "uninstall"].includes(action)) {
+            sendJson(res, 400, { ok: false, message: "action은 'install' 또는 'uninstall'이어야 합니다." });
+            return;
+          }
+          const pluginDir = path.join(REPO_ROOT, "mock-malicious-plugin");
+          if (!fs.existsSync(pluginDir)) {
+            sendJson(res, 500, { ok: false, message: `플러그인 디렉토리를 찾을 수 없습니다: ${pluginDir}` });
+            return;
+          }
+          if (action === "install") {
+            try {
+              const { stdout, stderr } = await execFileAsync("openclaw", ["plugins", "install", pluginDir], {
+                cwd: REPO_ROOT,
+                timeout: 30_000,
+              });
+              sendJson(res, 200, { ok: true, action, stdout: stdout.trim(), stderr: stderr.trim() });
+            } catch (e) {
+              const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+              sendJson(res, 500, { ok: false, message: err.message ?? String(e), stderr: String(err.stderr ?? "").trim() });
+            }
+          } else {
+            // 제거: 디렉토리 삭제 + openclaw.json에서 등록 정보 제거
+            const os = await import("node:os");
+            const home = os.homedir();
+            const extDir = path.join(home, ".openclaw", "extensions", pluginId);
+            const configPath = path.join(home, ".openclaw", "openclaw.json");
+            try {
+              // 1) 확장 디렉토리 삭제
+              if (fs.existsSync(extDir)) {
+                fs.rmSync(extDir, { recursive: true, force: true });
+              }
+              // 2) openclaw.json에서 plugins.entries / plugins.installs 항목 제거
+              if (fs.existsSync(configPath)) {
+                const raw = fs.readFileSync(configPath, "utf8");
+                const cfg = JSON.parse(raw) as Record<string, unknown>;
+                const plugins = (cfg.plugins ?? {}) as Record<string, Record<string, unknown>>;
+                const entries = (plugins.entries ?? {}) as Record<string, unknown>;
+                const installs = (plugins.installs ?? {}) as Record<string, unknown>;
+                delete entries[pluginId];
+                delete installs[pluginId];
+                plugins.entries = entries;
+                plugins.installs = installs;
+                cfg.plugins = plugins;
+                fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+              }
+              sendJson(res, 200, { ok: true, action, removed: extDir });
+            } catch (e) {
+              sendJson(res, 500, { ok: false, message: `제거 실패: ${e instanceof Error ? e.message : String(e)}` });
+            }
+          }
+          return;
+        }
+
         if (url === "/api/scenario/send" && req.method === "POST") {
           const body = await readJsonBody(req);
           const wsUrl = String(body.wsUrl ?? "").trim();
@@ -343,6 +400,21 @@ export function sentinelControlPlugin(): Plugin {
           spawnError = null;
           killChild();
           sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/clear-trace" && req.method === "POST") {
+          const tracePath = defaultTracePath();
+          try {
+            if (fs.existsSync(tracePath)) {
+              fs.rmSync(tracePath);
+              sendJson(res, 200, { ok: true, removed: tracePath });
+            } else {
+              sendJson(res, 200, { ok: true, removed: null, message: "파일 없음" });
+            }
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
           return;
         }
 

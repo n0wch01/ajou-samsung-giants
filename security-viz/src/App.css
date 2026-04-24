@@ -54,11 +54,32 @@ a {
   gap: 10px;
 }
 
-.app-header-chito {
-  width: 40px;
-  height: 40px;
-  object-fit: contain;
+.app-header-chito-wrap {
   flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #1e3558;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-header-chito {
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+}
+
+.kakao-room-avatar,
+.kakao-msg-avatar {
+  flex-shrink: 0;
+  object-fit: contain;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 36%, #fffefb 0%, #f5ebe1 52%, #e8ddd2 100%);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.5),
+    0 2px 14px rgba(0, 0, 0, 0.45);
 }
 
 .app-header h1 {
@@ -296,6 +317,62 @@ button:disabled {
   color: var(--warn);
 }
 
+.scenario-guardrail-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.scenario-guardrail-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.scenario-guardrail-btns {
+  display: flex;
+  gap: 4px;
+}
+.scenario-guardrail-btn {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.scenario-guardrail-btn:disabled { opacity: 0.4; cursor: default; }
+.scenario-guardrail-btn-on:hover:not(:disabled),
+.scenario-guardrail-btn-on.active {
+  background: rgba(61,220,132,0.12);
+  color: var(--ok);
+  border-color: rgba(61,220,132,0.4);
+}
+.scenario-guardrail-btn-off:hover:not(:disabled),
+.scenario-guardrail-btn-off.active {
+  background: rgba(245,145,58,0.12);
+  color: var(--warn);
+  border-color: rgba(245,145,58,0.4);
+}
+.scenario-guardrail-status {
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+.scenario-guardrail-status-on    { color: var(--ok); }
+.scenario-guardrail-status-off   { color: var(--warn); }
+.scenario-guardrail-status-error { color: var(--danger); }
+.scenario-guardrail-status-unknown,
+.scenario-guardrail-status-loading { color: var(--muted); }
+
 .scenario-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -390,10 +467,18 @@ button:disabled {
 
 .sentinel-header h2 { margin: 0; }
 
+/* chitoclaw1 — 가로 포스터형: 작은 원에 넣으면 비율이 깨져 보이므로 둥근 사각 + 여백 */
 .sentinel-chito {
-  width: 44px;
+  flex-shrink: 0;
+  width: 56px;
   height: 44px;
+  padding: 3px 5px;
   object-fit: contain;
+  border-radius: 12px;
+  background: linear-gradient(165deg, rgba(255, 252, 248, 0.95) 0%, rgba(236, 228, 218, 0.9) 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.35),
+    0 2px 12px rgba(0, 0, 0, 0.35);
   animation: sentinel-bounce 1.6s ease-in-out infinite;
 }
 
@@ -454,6 +539,32 @@ button:disabled {
 
 .sentinel-actions {
   gap: 8px;
+}
+
+.sentinel-trace-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trace-clear-btn {
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  background: transparent;
+  border: 1px solid var(--warn);
+  color: var(--warn);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.trace-clear-btn:hover:not(:disabled) {
+  background: rgba(255, 100, 80, 0.12);
+}
+
+.trace-clear-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .sentinel-logs {
@@ -703,10 +814,15 @@ button:disabled {
 }
 
 .kakao-empty-illust {
-  width: 100px;
-  height: 100px;
+  width: 112px;
+  height: 112px;
   object-fit: contain;
-  opacity: 0.92;
+  padding: 10px;
+  border-radius: 22px;
+  background: radial-gradient(circle at 50% 38%, #fffefb 0%, #f0e6dc 55%, #e0d4c8 100%);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.4),
+    0 4px 18px rgba(0, 0, 0, 0.4);
 }
 
 .kakao-room-hint {
@@ -734,10 +850,9 @@ button:disabled {
 }
 
 .kakao-room-avatar {
-  width: 26px;
-  height: 26px;
-  object-fit: contain;
-  border-radius: 50%;
+  width: 30px;
+  height: 30px;
+  padding: 2px;
 }
 
 .kakao-room-scroll {
@@ -779,11 +894,9 @@ button:disabled {
 }
 
 .kakao-msg-avatar {
-  width: 32px;
-  height: 32px;
-  object-fit: contain;
-  border-radius: 50%;
-  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 3px;
   margin-top: 2px;
 }
 
@@ -1226,7 +1339,64 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 .cfg-string { color: #89d96a; font-size: 0.78rem; word-break: break-all; }
 .cfg-number { color: #f5c842; font-size: 0.78rem; }
 .cfg-bool   { color: #ff8a65; font-size: 0.78rem; }
+.cfg-bool-true  { color: var(--ok); }
+.cfg-bool-false { color: var(--muted); }
 .cfg-null   { color: var(--muted); font-size: 0.78rem; font-style: italic; }
+
+/* ── config flat table ──────────────────────────────────────────────── */
+.cfg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8rem;
+}
+.cfg-th {
+  text-align: left;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--border);
+}
+.cfg-tr:hover { background: rgba(255,255,255,0.03); }
+.cfg-td-key {
+  padding: 4px 8px 4px 0;
+  vertical-align: top;
+  min-width: 180px;
+  max-width: 320px;
+  word-break: break-all;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.cfg-td-key code {
+  color: #8ab4f8;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.cfg-td-val {
+  padding: 4px 8px;
+  vertical-align: top;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  word-break: break-word;
+}
+.cfg-td-empty {
+  padding: 12px 8px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  text-align: center;
+}
+.cfg-array-inline { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+
+/* ── policy error ───────────────────────────────────────────────────── */
+.policy-fetch-error {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: rgba(232,67,90,0.1);
+  border: 1px solid rgba(232,67,90,0.3);
+  border-radius: 6px;
+  color: var(--danger);
+  font-size: 0.82rem;
+}
 .cfg-muted  { color: var(--muted); font-size: 0.78rem; }
 
 .cfg-toggle {
@@ -1308,19 +1478,36 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   border-color: var(--muted);
 }
 
-.plugin-install-hint {
-  margin: 4px 0 8px;
-  padding: 6px 10px;
-  background: rgba(0,0,0,0.3);
-  border-radius: 6px;
-  font-size: 0.72rem;
+.plugin-manage-row {
+  margin: 6px 0;
+  display: flex;
+  gap: 6px;
 }
 
-.plugin-install-hint code {
-  color: var(--accent);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  word-break: break-all;
+.plugin-manage-btn {
+  font-size: 0.78rem;
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s, opacity 0.15s;
 }
+.plugin-manage-btn:disabled { opacity: 0.5; cursor: default; }
+
+.plugin-manage-btn-install {
+  background: rgba(61, 220, 132, 0.12);
+  color: var(--ok);
+  border-color: rgba(61, 220, 132, 0.35);
+}
+.plugin-manage-btn-install:hover:not(:disabled) { background: rgba(61, 220, 132, 0.22); }
+
+.plugin-manage-btn-uninstall {
+  background: rgba(232, 67, 90, 0.08);
+  color: var(--danger);
+  border-color: rgba(232, 67, 90, 0.3);
+}
+.plugin-manage-btn-uninstall:hover:not(:disabled) { background: rgba(232, 67, 90, 0.18); }
 
 /* Scenario variant message buttons */
 .variant-btn-row {
@@ -1384,7 +1571,70 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
 }
 
-/* ── 가드레일 토글 ─────────────────────────────────────────────────────── */
+/* ── 탐지 후 대응(Remediation) ───────────────────────────────────────── */
+.remediation-panel {
+  margin-top: 20px;
+  border: 1px solid rgba(245, 145, 58, 0.35);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: rgba(245, 145, 58, 0.05);
+}
+.remediation-title {
+  margin: 0 0 4px;
+  font-size: 0.92rem;
+  color: var(--warn);
+}
+.remediation-action-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.remediation-status { flex: 1; min-width: 0; }
+.remediation-badge {
+  display: inline-block;
+  font-size: 0.78rem;
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-weight: 600;
+  border: 1px solid transparent;
+}
+.remediation-badge-unknown { color: var(--muted); background: rgba(255,255,255,0.04); border-color: var(--border); }
+.remediation-badge-loading { color: var(--muted); font-style: italic; }
+.remediation-badge-blocked { color: var(--ok); background: rgba(61,220,132,0.1); border-color: rgba(61,220,132,0.3); }
+.remediation-badge-allowed { color: var(--warn); background: rgba(245,145,58,0.1); border-color: rgba(245,145,58,0.3); }
+.remediation-badge-error   { color: var(--danger); background: rgba(232,67,90,0.1); border-color: rgba(232,67,90,0.25); }
+
+.remediation-block-btn {
+  font-size: 0.82rem;
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(232, 67, 90, 0.5);
+  background: rgba(232, 67, 90, 0.1);
+  color: var(--danger);
+  cursor: pointer;
+  font-weight: 600;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.remediation-block-btn:hover:not(:disabled) { background: rgba(232, 67, 90, 0.2); }
+.remediation-block-btn:disabled { opacity: 0.4; cursor: default; }
+
+.remediation-unblock-btn {
+  font-size: 0.78rem;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+.remediation-unblock-btn:hover:not(:disabled) { background: rgba(255,255,255,0.06); color: var(--text); }
+.remediation-unblock-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── 가드레일 chip (공유) ────────────────────────────────────────────── */
 .guardrail-bar {
   display: flex;
   flex-wrap: wrap;

@@ -1,3 +1,4 @@
+import { apiPath } from "../lib/publicAsset";
 import { buildConnectReq, newReqId, parseGwFrame, type GwFrame } from "./protocol";
 
 /** 로컬 루프백에서 ingest/send_scenario와 동일한 클라이언트(페어링 생략 정책 정렬). */
@@ -205,7 +206,7 @@ export async function sendScenarioThroughDevServer(opts: {
     return { ok: false, message: "취소됨" };
   }
   try {
-    const res = await fetch("/api/scenario/send", {
+    const res = await fetch(apiPath("/api/scenario/send"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       signal: opts.signal,

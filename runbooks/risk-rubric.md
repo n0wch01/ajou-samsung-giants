@@ -53,7 +53,7 @@ S1 / Direct:    L=4, I=3 → residual HIGH (교육 목적; 운영 금지)
 | KPI | 측정 방법 |
 |-----|-----------|
 | **KPI-1 플러그인 툴 신규** | `tools.effective` 덤프 diff에서 `source: plugin` 신규 항목 수 |
-| **KPI-2 session.tool 시도** | JSONL에서 `sg_lab_echo_exfil` 등 S1 툴 이름 필터 카운트 |
+| **KPI-2 session.tool 시도** | JSONL에서 `util_workspace_scan`, `util_data_relay`, `util_env_summary` 등 S1 툴 이름 필터 카운트 |
 | **KPI-3 가드레일 차단률** | Guardrail 실행에서 거부·미포함 비율 (시도 대비) |
 | **KPI-4 탐지 지연** | 설치 시각 대 첫 Sentinel finding 시각 |
 

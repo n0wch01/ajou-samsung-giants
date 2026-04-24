@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { publicAsset } from "../lib/publicAsset";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
@@ -767,7 +768,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   if (props.connState !== "ready") {
     return (
       <section className="kakao-room kakao-room-empty">
-        <img src="/chitoclaw2.png" alt="chito and openclaw" className="kakao-empty-illust" />
+        <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
         <p className="kakao-room-hint">
           OpenClaw에서 쓰는 것과 <strong>같은 세션 키</strong>로 연결하면, 여기 채팅방에 내 메시지·답변·그때 호출된 도구가 보입니다.
         </p>
@@ -781,7 +782,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   return (
     <section className="kakao-room">
       <div className="kakao-room-title">
-        <img src="/sgchito.png" alt="chito" className="kakao-room-avatar" />
+        <img src={publicAsset("chito.png")} alt="chito" className="kakao-room-avatar" />
         채팅
       </div>
       <div className="kakao-room-scroll" ref={scrollRef}>
@@ -839,7 +840,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
             </div>
             {turn.assistantChunks.length > 0 ? (
               <div className="kakao-row-assistant kakao-row-assistant-after-tools">
-                <img src="/sgchito.png" alt="chito" className="kakao-msg-avatar" />
+                <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
                 <div className="kakao-bubble-assistant kakao-bubble-md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {turn.assistantChunks.join("\n\n")}
