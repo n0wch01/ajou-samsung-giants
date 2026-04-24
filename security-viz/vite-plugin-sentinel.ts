@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { execFile, spawn, type ChildProcess } from "node:child_process";
+import { execFile, execSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +52,20 @@ let startedAt: number | null = null;
 let lastExitCode: number | null = null;
 let stderrBuf = "";
 let spawnError: string | null = null;
+
+/** run-viz.sh 등 외부에서 실행된 ingest.py PID를 찾는다 (macOS/Linux) */
+function findExternalIngestPid(): number | null {
+  try {
+    const out = execSync("pgrep -f 'sentinel/ingest.py'", {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+    const pid = parseInt(out.split("\n")[0], 10);
+    return isNaN(pid) ? null : pid;
+  } catch {
+    return null;
+  }
+}
 
 function appendLog(chunk: Buffer | string): void {
   stderrBuf += String(chunk);
@@ -111,6 +125,100 @@ export function sentinelControlPlugin(): Plugin {
         const url = req.url?.split("?")[0] ?? "";
         if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario")) {
           next();
+          return;
+        }
+
+        if (url === "/api/scenario/plugin-status" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const wsUrl = String(body.wsUrl ?? "").trim();
+          const token = String(body.token ?? "").trim();
+          const toolNames = Array.isArray(body.toolNames)
+            ? (body.toolNames as unknown[]).map(String).filter(Boolean)
+            : [];
+          if (!wsUrl || !token) {
+            sendJson(res, 400, { ok: false, message: "wsUrl과 token이 필요합니다." });
+            return;
+          }
+          const checkPy = path.join(REPO_ROOT, "scripts", "runner", "check_plugin.py");
+          if (!fs.existsSync(checkPy)) {
+            sendJson(res, 500, { ok: false, message: `check_plugin.py를 찾을 수 없습니다: ${checkPy}` });
+            return;
+          }
+          const py = pickPython();
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            OPENCLAW_GATEWAY_WS_URL: wsUrl,
+            OPENCLAW_GATEWAY_TOKEN: token,
+          };
+          if (toolNames.length > 0) env.CHECK_TOOL_NAMES = toolNames.join(",");
+          try {
+            const { stdout } = await execFileAsync(py, [checkPy], {
+              cwd: REPO_ROOT,
+              env,
+              timeout: 20_000,
+            });
+            const parsed = JSON.parse(stdout.trim()) as unknown;
+            sendJson(res, 200, parsed);
+          } catch (e) {
+            const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+            const out = String(err.stdout ?? "").trim();
+            try {
+              const parsed = out ? (JSON.parse(out) as unknown) : null;
+              if (parsed) { sendJson(res, 200, parsed); return; }
+            } catch { /* ignore */ }
+            sendJson(res, 500, { ok: false, message: err.message ?? String(e) });
+          }
+          return;
+        }
+
+        if (url === "/api/scenario/guardrail" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const wsUrl = String(body.wsUrl ?? "").trim();
+          const token = String(body.token ?? "").trim();
+          const action = String(body.action ?? "status").trim();
+          const toolNames = Array.isArray(body.toolNames)
+            ? (body.toolNames as unknown[]).map(String).filter(Boolean)
+            : [];
+          if (!wsUrl || !token) {
+            sendJson(res, 400, { ok: false, message: "wsUrl과 token이 필요합니다." });
+            return;
+          }
+          if (!["on", "off", "status"].includes(action)) {
+            sendJson(res, 400, { ok: false, message: "action은 'on', 'off', 'status' 중 하나여야 합니다." });
+            return;
+          }
+          const guardrailPy = path.join(REPO_ROOT, "scripts", "runner", "toggle_guardrail.py");
+          if (!fs.existsSync(guardrailPy)) {
+            sendJson(res, 500, { ok: false, message: `toggle_guardrail.py를 찾을 수 없습니다: ${guardrailPy}` });
+            return;
+          }
+          const py = pickPython();
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            OPENCLAW_GATEWAY_WS_URL: wsUrl,
+            OPENCLAW_GATEWAY_TOKEN: token,
+            GUARDRAIL_ACTION: action,
+          };
+          if (toolNames.length > 0) env.GUARDRAIL_TOOL_NAMES = toolNames.join(",");
+          try {
+            const { stdout } = await execFileAsync(py, [guardrailPy], {
+              cwd: REPO_ROOT,
+              env,
+              timeout: 20_000,
+            });
+            const parsed = JSON.parse(stdout.trim()) as unknown;
+            sendJson(res, 200, parsed);
+          } catch (e) {
+            const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+            const out = String(err.stdout ?? "").trim();
+            try {
+              const parsed = out ? (JSON.parse(out) as unknown) : null;
+              if (parsed) { sendJson(res, 200, parsed); return; }
+            } catch { /* ignore */ }
+            sendJson(res, 500, { ok: false, message: err.message ?? String(e) });
+          }
           return;
         }
 
@@ -211,13 +319,18 @@ export function sentinelControlPlugin(): Plugin {
 
         if (url === "/api/sentinel/status" && req.method === "GET") {
           const trace = traceStat();
-          const running = Boolean(child && !child.killed);
+          const managedRunning = Boolean(child && !child.killed);
+          // run-viz.sh 등 외부에서 실행된 경우도 감지
+          const externalPid = !managedRunning ? findExternalIngestPid() : null;
+          const running = managedRunning || externalPid !== null;
+          const pid = managedRunning ? (child?.pid ?? null) : externalPid;
+          const uptime = managedRunning && startedAt ? Date.now() - startedAt : null;
           sendJson(res, 200, {
             controlAvailable: true,
             running,
-            pid: running && child?.pid ? child.pid : null,
-            startedAt,
-            uptimeMs: running && startedAt ? Date.now() - startedAt : null,
+            pid,
+            startedAt: managedRunning ? startedAt : null,
+            uptimeMs: uptime,
             lastExitCode,
             trace,
             stderrTail: stderrBuf.slice(-1200),

@@ -97,16 +97,9 @@ export function StageSentinelDetect() {
     <div className="panel sentinel-detect-panel">
       <h2>Sentinel 탐지 (detect)</h2>
       {controlMissing ? (
-        <p className="muted">
-          이 API는 Vite 개발 서버에서만 제공됩니다. 터미널에서는{" "}
-          <code>PYTHONPATH=scripts python scripts/sentinel/detect.py</code>를 실행하세요.
-        </p>
+        <p className="muted">개발 서버에서만 제어 가능합니다.</p>
       ) : (
         <>
-          <p className="muted">
-            현재 <code>trace.jsonl</code>과 <code>rules/*.yaml</code>, 베이스라인 JSON을 읽어 규칙을 평가합니다. 먼저
-            위에서 ingest로 trace를 쌓은 뒤 실행하는 것이 좋습니다.
-          </p>
           <div className="row" style={{ marginTop: 8 }}>
             <button type="button" className="primary" disabled={busy} onClick={() => void runDetect()}>
               {busy ? "탐지 실행 중…" : "규칙 검증 실행 (detect.py)"}
@@ -126,9 +119,7 @@ export function StageSentinelDetect() {
             </details>
           ) : null}
           {findings.length === 0 && report && !busy ? (
-            <p className="muted" style={{ marginTop: 10 }}>
-              발화한 규칙이 없습니다. trace가 비었거나 패턴이 맞지 않았을 수 있습니다.
-            </p>
+            <p className="muted" style={{ marginTop: 10 }}>발화한 규칙 없음</p>
           ) : null}
           <div className="stack detect-findings-stack">
             {findings.map((f) => (

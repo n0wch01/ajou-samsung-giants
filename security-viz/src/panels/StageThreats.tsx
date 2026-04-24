@@ -17,11 +17,6 @@ export function StageThreats(props: StageThreatsProps) {
   return (
     <div className="panel">
       <h2>Threats (Sentinel findings)</h2>
-      <p className="muted">
-        Findings load from a small HTTP service (Phase 1 convention: <code>GET /findings</code>) or optional{" "}
-        <code>GET /findings/stream</code> SSE. In Vite dev, requests proxy to <code>http://127.0.0.1:8787</code> via{" "}
-        <code>/sentinel-api/*</code>.
-      </p>
       <div className="row" style={{ marginBottom: 10 }}>
         <button type="button" onClick={props.onRefresh} disabled={props.loading}>
           {props.loading ? "Loading…" : "Refresh findings"}
@@ -37,7 +32,7 @@ export function StageThreats(props: StageThreatsProps) {
       </div>
       {props.error ? <p className="muted" style={{ color: "var(--warn)" }}>{props.error}</p> : null}
       {props.findings.length === 0 && !props.loading ? (
-        <p className="muted">No findings returned. Run Sentinel detect or stub a local findings server on port 8787.</p>
+        <p className="muted">findings 없음</p>
       ) : null}
       <div className="stack">
         {props.findings.map((f) => (

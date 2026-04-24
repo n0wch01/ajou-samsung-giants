@@ -7,11 +7,11 @@ import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "session" | "scenario" | "policy" | "sentinel";
+export type AppMainTab = "chat" | "scenario" | "policy" | "sentinel";
 
 export function App() {
   const gw = useGatewayReadonly();
-  const [tab, setTab] = useState<AppMainTab>("session");
+  const [tab, setTab] = useState<AppMainTab>("chat");
   const [wsUrl, setWsUrl] = useState(
     () =>
       (import.meta.env.VITE_SG_GATEWAY_WS_URL as string | undefined)?.trim() ||
@@ -64,20 +64,22 @@ export function App() {
   return (
     <div className="app-shell">
       <header className="app-header">
-        <h1>security-viz</h1>
-        <p className="sub">
-          SG-OpenClaw Gateway를 읽기 전용으로 구독하고, 시나리오 주입과 Sentinel 수집·탐지를 한 화면에서 전환합니다.
-        </p>
+        <div className="app-header-inner">
+          <img src="/sgchito.png" alt="chito" className="app-header-chito" />
+          <div>
+            <h1>security-viz</h1>
+          </div>
+        </div>
       </header>
       <nav className="app-tabs" role="tablist" aria-label="주요 영역">
         <button
           type="button"
           role="tab"
-          aria-selected={tab === "session"}
-          className={tab === "session" ? "app-tab active" : "app-tab"}
-          onClick={() => setTab("session")}
+          aria-selected={tab === "chat"}
+          className={tab === "chat" ? "app-tab active" : "app-tab"}
+          onClick={() => setTab("chat")}
         >
-          세션 · 타임라인
+          채팅
         </button>
         <button
           type="button"
@@ -107,22 +109,30 @@ export function App() {
           Sentinel
         </button>
       </nav>
-      <div className="app-body app-body-single">
-        <main className="main main-single">
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "session"}>
-            <StageInput
+      <div className="app-body">
+        <aside className="app-sidebar-left">
+          <StageInput
+            wsUrl={wsUrl}
+            token={token}
+            sessionKey={sessionKey}
+            onChangeWsUrl={setWsUrl}
+            onChangeToken={setToken}
+            onChangeSessionKey={setSessionKey}
+            onConnect={onConnect}
+            onDisconnect={gw.disconnect}
+            connState={gw.connState}
+            error={gw.error}
+          />
+        </aside>
+        <main className="app-main">
+          <section className="tab-panel chat-tab-panel" role="tabpanel" hidden={tab !== "chat"}>
+            <MessageToolFlow
+              entries={gw.timeline}
+              connState={gw.connState}
               wsUrl={wsUrl}
               token={token}
               sessionKey={sessionKey}
-              onChangeWsUrl={setWsUrl}
-              onChangeToken={setToken}
-              onChangeSessionKey={setSessionKey}
-              onConnect={onConnect}
-              onDisconnect={gw.disconnect}
-              connState={gw.connState}
-              error={gw.error}
             />
-            <MessageToolFlow entries={gw.timeline} connState={gw.connState} />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>

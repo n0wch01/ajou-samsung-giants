@@ -1,12 +1,16 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 
 type MessageToolFlowProps = {
   entries: TimelineEntry[];
   connState: ConnState;
+  wsUrl: string;
+  token: string;
+  sessionKey: string;
 };
 
 type ToolLine = {
@@ -737,9 +741,33 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
     [props.entries],
   );
 
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const userScrolledUp = useRef(false);
+
+  // 사용자가 위로 스크롤하면 자동 스크롤 잠시 중단
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+      userScrolledUp.current = !atBottom;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+
+  // 새 메시지/이벤트가 오면 바닥으로 스크롤
+  useEffect(() => {
+    if (!userScrolledUp.current) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [turns, orphanAssistantChunks]);
+
   if (props.connState !== "ready") {
     return (
       <section className="kakao-room kakao-room-empty">
+        <img src="/chitoclaw2.png" alt="chito and openclaw" className="kakao-empty-illust" />
         <p className="kakao-room-hint">
           OpenClaw에서 쓰는 것과 <strong>같은 세션 키</strong>로 연결하면, 여기 채팅방에 내 메시지·답변·그때 호출된 도구가 보입니다.
         </p>
@@ -752,8 +780,11 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
 
   return (
     <section className="kakao-room">
-      <div className="kakao-room-title">채팅</div>
-      <div className="kakao-room-scroll">
+      <div className="kakao-room-title">
+        <img src="/sgchito.png" alt="chito" className="kakao-room-avatar" />
+        채팅
+      </div>
+      <div className="kakao-room-scroll" ref={scrollRef}>
         {empty ? (
           <p className="kakao-room-wait">이 세션에서 메시지를 내면 여기에 표시됩니다.</p>
         ) : null}
@@ -808,6 +839,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
             </div>
             {turn.assistantChunks.length > 0 ? (
               <div className="kakao-row-assistant kakao-row-assistant-after-tools">
+                <img src="/sgchito.png" alt="chito" className="kakao-msg-avatar" />
                 <div className="kakao-bubble-assistant kakao-bubble-md">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {turn.assistantChunks.join("\n\n")}
@@ -817,8 +849,80 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
             ) : null}
           </div>
         ))}
+        <div ref={bottomRef} />
       </div>
+      <ChatInput wsUrl={props.wsUrl} token={props.token} sessionKey={props.sessionKey} />
     </section>
+  );
+}
+
+function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) {
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [hint, setHint] = useState<string | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    if (!hint) return;
+    const t = window.setTimeout(() => setHint(null), 4000);
+    return () => window.clearTimeout(t);
+  }, [hint]);
+
+  const send = useCallback(async () => {
+    const msg = text.trim();
+    if (!msg || sending) return;
+    setSending(true);
+    setHint(null);
+    try {
+      const res = await sendScenarioThroughDevServer({
+        wsUrl: props.wsUrl,
+        token: props.token,
+        sessionKey: props.sessionKey,
+        message: msg,
+        scenarioId: "chat",
+      });
+      if (res.ok) {
+        setText("");
+        inputRef.current?.focus();
+      } else {
+        setHint(res.message);
+      }
+    } finally {
+      setSending(false);
+    }
+  }, [text, sending, props.wsUrl, props.token, props.sessionKey]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void send();
+    }
+  };
+
+  return (
+    <div className="chat-input-bar">
+      {hint ? <p className="chat-input-hint">{hint}</p> : null}
+      <div className="chat-input-row">
+        <textarea
+          ref={inputRef}
+          className="chat-input-textarea"
+          placeholder="메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"
+          value={text}
+          rows={1}
+          disabled={sending}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={onKeyDown}
+        />
+        <button
+          type="button"
+          className="chat-input-send"
+          disabled={sending || !text.trim()}
+          onClick={() => void send()}
+        >
+          {sending ? "⏳" : "전송"}
+        </button>
+      </div>
+    </div>
   );
 }
 

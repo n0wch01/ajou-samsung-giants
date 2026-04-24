@@ -19,10 +19,6 @@ export function StageInput(props: StageInputProps) {
   return (
     <div className="panel">
       <h2>OpenClaw gateway</h2>
-      <p className="muted">
-        Read-only: subscribes to <code>sessions.subscribe</code> and <code>sessions.messages.subscribe</code> for the
-        session below. Does not send chat or abort sessions.
-      </p>
       <div className="row" style={{ marginTop: 10 }}>
         <div className="field" style={{ flex: 2 }}>
           <label htmlFor="ws">WebSocket URL</label>

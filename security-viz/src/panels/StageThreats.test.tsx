@@ -29,7 +29,7 @@ function renderThreats(overrides: Partial<Parameters<typeof StageThreats>[0]> = 
 describe("StageThreats", () => {
   it("shows empty state when no findings", () => {
     renderThreats();
-    expect(screen.getByText(/no findings/i)).toBeInTheDocument();
+    expect(screen.getByText(/findings 없음/)).toBeInTheDocument();
   });
 
   it("shows loading text when loading=true", () => {

@@ -157,19 +157,16 @@ export function StageSentinel(props: StageSentinelProps) {
 
   return (
     <div className="panel sentinel-panel">
-      <h2>Sentinel 수집 (ingest)</h2>
+      <div className="sentinel-header">
+        <h2>Sentinel 수집 (ingest)</h2>
+        {status?.running ? (
+          <img src="/chitoclaw1.png" alt="sentinel active" className="sentinel-chito" />
+        ) : null}
+      </div>
       {controlMissing ? (
-        <p className="muted">
-          이 제어 API는 <strong>Vite 개발 서버</strong>(<code>npm run dev</code> / <code>run-viz.sh</code>)에서만
-          제공됩니다. <code>vite preview</code>나 정적 배포에서는 토글을 쓸 수 없습니다. 대신 터미널에서{" "}
-          <code>scripts/sentinel/ingest.py</code>를 실행하세요.
-        </p>
+        <p className="muted">개발 서버(<code>run-viz.sh</code>)에서만 제어 가능합니다.</p>
       ) : (
         <>
-          <p className="muted">
-            게이트웨이 이벤트를 <code>scripts/sentinel/data/trace.jsonl</code>에 씁니다. 위 연결 정보와 동일한 URL·토큰·세션
-            키로 프로세스를 띄웁니다.
-          </p>
           <div className="sentinel-status-grid">
             <div>
               <span className="sentinel-label">프로세스</span>

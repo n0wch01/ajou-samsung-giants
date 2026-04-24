@@ -212,6 +212,59 @@ def _eval_rule(
                 )
         return out
 
+    if mtype == "event_sequence":
+        steps = match.get("steps") or []
+        event_name = str(match.get("event") or "session.tool")
+        max_gap_s = float(match.get("max_gap_seconds") or 600)
+        if len(steps) < 2:
+            return out
+        # Collect gateway events matching this event name
+        relevant: list[tuple[str, dict[str, Any]]] = []
+        for row in trace:
+            if row.get("entry_type") != "gateway_event":
+                continue
+            if row.get("event_name") != event_name:
+                continue
+            ts = str(row.get("recorded_at") or row.get("timestamp") or "")
+            raw = row.get("raw_frame") if isinstance(row.get("raw_frame"), dict) else row
+            relevant.append((ts, raw))
+        if not relevant:
+            return out
+        # Check each step has at least one matching event, and they appear in order
+        import re as _re
+        step_matches: list[list[tuple[str, dict[str, Any]]]] = []
+        for step in steps:
+            pat_s = str(step.get("pattern") or "")
+            try:
+                cre_s = _re.compile(pat_s)
+            except _re.error:
+                return out
+            matched = [(ts, r) for ts, r in relevant if cre_s.search(json.dumps(r, ensure_ascii=False))]
+            step_matches.append(matched)
+        # All steps must have at least one match
+        if not all(step_matches):
+            return out
+        # Verify temporal order: earliest match of step[i] must be <= earliest match of step[i+1]
+        # Use lexicographic ISO timestamp comparison (works for UTC ISO-8601)
+        in_order = True
+        for i in range(len(step_matches) - 1):
+            earliest_cur = min(ts for ts, _ in step_matches[i]) if step_matches[i] else ""
+            earliest_next = min(ts for ts, _ in step_matches[i + 1]) if step_matches[i + 1] else ""
+            if earliest_cur and earliest_next and earliest_cur > earliest_next:
+                in_order = False
+                break
+        if in_order:
+            out.append(
+                _finding(
+                    rule_id=rid,
+                    severity=sev,
+                    title=title,
+                    message=str(rule.get("message") or f"Event sequence detected: {[s.get('pattern') for s in steps]}"),
+                    recommended_action=rec_default,
+                )
+            )
+        return out
+
     if mtype == "tools_effective_diff":
         added_pat = str(match.get("added_regex") or ".*")
         try:
