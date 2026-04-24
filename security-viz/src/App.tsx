@@ -73,49 +73,49 @@ export function App() {
           <div className="app-header-chito-wrap">
             <img src={publicAsset("sgclaw_nobg.png")} alt="sgclaw" className="app-header-chito" />
           </div>
-          <div>
-            <h1>SG-ClawWatch</h1>
+          <div className="app-header-title-tabs">
+            <h1 className="app-header-title">SG-ClawWatch</h1>
+            <nav className="app-tabs" role="tablist" aria-label="주요 영역">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "chat"}
+                className={tab === "chat" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("chat")}
+              >
+                채팅
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "scenario"}
+                className={tab === "scenario" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("scenario")}
+              >
+                시나리오
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "policy"}
+                className={tab === "policy" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("policy")}
+              >
+                정책
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "sentinel"}
+                className={tab === "sentinel" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("sentinel")}
+              >
+                Sentinel
+              </button>
+            </nav>
           </div>
         </div>
       </header>
-      <nav className="app-tabs" role="tablist" aria-label="주요 영역">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "chat"}
-          className={tab === "chat" ? "app-tab active" : "app-tab"}
-          onClick={() => setTab("chat")}
-        >
-          채팅
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "scenario"}
-          className={tab === "scenario" ? "app-tab active" : "app-tab"}
-          onClick={() => setTab("scenario")}
-        >
-          시나리오
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "policy"}
-          className={tab === "policy" ? "app-tab active" : "app-tab"}
-          onClick={() => setTab("policy")}
-        >
-          정책
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "sentinel"}
-          className={tab === "sentinel" ? "app-tab active" : "app-tab"}
-          onClick={() => setTab("sentinel")}
-        >
-          Sentinel
-        </button>
-      </nav>
       <div className="app-body">
         <aside className="app-sidebar-left">
           <StageInput
