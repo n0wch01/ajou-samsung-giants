@@ -13,7 +13,11 @@
     ``operator.read`` 스코프가 유지된다(공유 토큰만 쓸 때의 missing scope 방지).
   OPENCLAW_GATEWAY_DEVICE_FAMILY — (선택) connect ``client.deviceFamily`` 및 서명 페이로드
   SENTINEL_TRACE_PATH       — 기본 <repo>/scripts/sentinel/data/trace.jsonl
+  SENTINEL_TRACE_MAX_MB     — trace.jsonl 최대 크기(MB). 초과 시 .old로 로테이션. 기본 50
   SENTINEL_TRACE_INCLUDE_RAW — 1이면 원본 gateway frame 포함(용량 큼)
+  SENTINEL_REDACT_SECRETS   — 0이면 redaction 비활성. 기본 1(활성)
+  SENTINEL_RECONNECT_MAX    — WS 재연결 최대 횟수. 0=무제한. 기본 0
+  SENTINEL_RECONNECT_DELAY_S — 재연결 초기 대기(초). 지수 백오프 적용. 기본 5
 """
 
 from __future__ import annotations
@@ -22,10 +26,60 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
 from typing import Any
+
+# Patterns that look like secrets — redacted before writing to trace
+_SECRET_PATTERNS: list[re.Pattern[str]] = [
+    # matches both YAML/config (api_key: value) and JSON ("api_key": "value") formats
+    re.compile(r'(?i)(api[_-]?key\s*[:=]\s*|"api[_-]?key"\s*:\s*")[^\s"\'\\]{8,}'),
+    re.compile(r'(?i)(password\s*[:=]\s*)[^\s"\']{4,}'),
+    re.compile(r'(?i)(bearer\s+)[A-Za-z0-9\-._~+/]{20,}'),
+    re.compile(r'AKIA[0-9A-Z]{16}'),
+    re.compile(r'-----BEGIN (?:RSA |OPENSSH |)PRIVATE KEY-----.*?-----END (?:RSA |OPENSSH |)PRIVATE KEY-----', re.DOTALL),
+]
+
+
+def _redact_secrets(text: str) -> str:
+    for pat in _SECRET_PATTERNS:
+        if pat.groups:
+            # Replace only the non-prefix part (keep group 1, redact the rest)
+            text = pat.sub(lambda m: m.group(1) + "***REDACTED***", text)
+        else:
+            text = pat.sub("***REDACTED***", text)
+    return text
+
+
+def _maybe_redact(obj: Any, redact: bool) -> Any:
+    if not redact:
+        return obj
+    serialized = json.dumps(obj, ensure_ascii=False)
+    redacted = _redact_secrets(serialized)
+    if redacted == serialized:
+        return obj
+    try:
+        return json.loads(redacted)
+    except json.JSONDecodeError:
+        return obj
+
+
+def _rotate_trace_if_needed(trace_path: Path, max_mb: float) -> None:
+    if max_mb <= 0:
+        return
+    try:
+        size_mb = trace_path.stat().st_size / (1024 * 1024)
+    except FileNotFoundError:
+        return
+    if size_mb >= max_mb:
+        old_path = trace_path.with_suffix(".jsonl.old")
+        trace_path.rename(old_path)
+        print(
+            f"[sentinel-ingest] trace rotated ({size_mb:.1f} MB >= {max_mb} MB) → {old_path}",
+            file=sys.stderr,
+        )
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
@@ -121,7 +175,7 @@ def _trace_record(
     return rec
 
 
-async def _run_ingest(
+async def _run_ingest_once(
     *,
     ws_url: str,
     token: str,
@@ -129,27 +183,21 @@ async def _run_ingest(
     trace_path: Path,
     scopes: list[str],
     include_raw: bool,
+    redact: bool,
+    max_mb: float,
     snapshot_tools: bool,
     device_identity_path: str | None = None,
 ) -> None:
+    """Single WS connection lifetime. Raises on terminal errors; caller handles reconnect."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
 
     def append_line(obj: dict[str, Any]) -> None:
+        _rotate_trace_if_needed(trace_path, max_mb)
+        obj = _maybe_redact(obj, redact)
         line = json.dumps(obj, ensure_ascii=False)
         with trace_path.open("a", encoding="utf-8") as f:
             f.write(line + "\n")
             f.flush()
-
-    append_line(
-        {
-            "trace_version": 1,
-            "ts_ms": wall_time_ms(),
-            "entry_type": "meta",
-            "message": "sentinel ingest start",
-            "session_key": session_key or None,
-            "ws_url_host": ws_url.split("@")[-1][:120],
-        }
-    )
 
     session = await GwSession.connect(
         ws_url, token=token, scopes=scopes, device_identity_path=device_identity_path
@@ -187,7 +235,8 @@ async def _run_ingest(
     if snapshot_tools:
         for method in ("tools.effective", "tools.catalog"):
             try:
-                res = await session.rpc(method, {}, timeout_s=60.0)
+                params = {"sessionKey": session_key} if method == "tools.effective" and session_key else {}
+                res = await session.rpc(method, params, timeout_s=60.0)
                 synthetic = {
                     "type": "res",
                     "id": "ingest-synthetic",
@@ -223,15 +272,76 @@ async def _run_ingest(
     except asyncio.CancelledError:
         pass
     finally:
-        append_line(
-            {
-                "trace_version": 1,
-                "ts_ms": wall_time_ms(),
-                "entry_type": "meta",
-                "message": "sentinel ingest stop",
-            }
-        )
         await session.close()
+
+
+async def _run_ingest(
+    *,
+    ws_url: str,
+    token: str,
+    session_key: str,
+    trace_path: Path,
+    scopes: list[str],
+    include_raw: bool,
+    redact: bool,
+    max_mb: float,
+    snapshot_tools: bool,
+    device_identity_path: str | None = None,
+    reconnect_max: int = 0,
+    reconnect_delay_s: float = 5.0,
+) -> None:
+    """Reconnect loop around _run_ingest_once."""
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def meta_line(msg: str) -> None:
+        line = json.dumps(
+            {"trace_version": 1, "ts_ms": wall_time_ms(), "entry_type": "meta", "message": msg,
+             "session_key": session_key or None},
+            ensure_ascii=False,
+        )
+        with trace_path.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+            f.flush()
+
+    meta_line(f"sentinel ingest start (ws_url_host={ws_url.split('@')[-1][:120]})")
+
+    attempt = 0
+    delay = reconnect_delay_s
+    while True:
+        try:
+            await _run_ingest_once(
+                ws_url=ws_url,
+                token=token,
+                session_key=session_key,
+                trace_path=trace_path,
+                scopes=scopes,
+                include_raw=include_raw,
+                redact=redact,
+                max_mb=max_mb,
+                snapshot_tools=snapshot_tools,
+                device_identity_path=device_identity_path,
+            )
+            break  # clean CancelledError exit
+        except asyncio.CancelledError:
+            break
+        except Exception as exc:
+            attempt += 1
+            if reconnect_max > 0 and attempt >= reconnect_max:
+                meta_line(f"sentinel ingest fatal after {attempt} attempt(s): {exc}")
+                print(f"[sentinel-ingest] giving up after {attempt} attempt(s): {exc}", file=sys.stderr)
+                raise
+            print(
+                f"[sentinel-ingest] connection lost (attempt {attempt}): {exc} — reconnecting in {delay:.0f}s",
+                file=sys.stderr,
+            )
+            meta_line(f"connection lost (attempt {attempt}): {exc} — reconnecting in {delay:.0f}s")
+            try:
+                await asyncio.sleep(delay)
+            except asyncio.CancelledError:
+                break
+            delay = min(delay * 2, 120.0)  # cap at 2 minutes
+
+    meta_line("sentinel ingest stop")
 
 
 def _payload_tool_count(payload: Any, *, cap: int = 500) -> dict[str, Any]:
@@ -283,6 +393,20 @@ async def _async_main(args: argparse.Namespace) -> None:
     include_raw = args.include_raw if args.include_raw is not None else _truthy(
         "SENTINEL_TRACE_INCLUDE_RAW", default=True
     )
+    redact = _truthy("SENTINEL_REDACT_SECRETS", default=True)
+    try:
+        max_mb = float(os.environ.get("SENTINEL_TRACE_MAX_MB") or "50")
+    except ValueError:
+        max_mb = 50.0
+    try:
+        reconnect_max = int(os.environ.get("SENTINEL_RECONNECT_MAX") or "0")
+    except ValueError:
+        reconnect_max = 0
+    try:
+        reconnect_delay_s = float(os.environ.get("SENTINEL_RECONNECT_DELAY_S") or "5")
+    except ValueError:
+        reconnect_delay_s = 5.0
+
     task = asyncio.create_task(
         _run_ingest(
             ws_url=ws_url,
@@ -291,8 +415,12 @@ async def _async_main(args: argparse.Namespace) -> None:
             trace_path=trace_path,
             scopes=scopes,
             include_raw=include_raw,
+            redact=redact,
+            max_mb=max_mb,
             snapshot_tools=not args.no_tools_snapshot,
             device_identity_path=args.device_identity_path,
+            reconnect_max=reconnect_max,
+            reconnect_delay_s=reconnect_delay_s,
         )
     )
     try:

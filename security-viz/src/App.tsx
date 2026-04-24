@@ -1,12 +1,13 @@
 import { useCallback, useState } from "react";
 import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
+import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
 import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "session" | "scenario" | "sentinel";
+export type AppMainTab = "session" | "scenario" | "policy" | "sentinel";
 
 export function App() {
   const gw = useGatewayReadonly();
@@ -25,12 +26,40 @@ export function App() {
       "agent:main",
   );
 
+  const [configPayload, setConfigPayload] = useState<unknown>(undefined);
+  const [catalogPayload, setCatalogPayload] = useState<unknown>(undefined);
+  const [policyBusy, setPolicyBusy] = useState(false);
+
   const onConnect = useCallback(() => {
     localStorage.setItem("sg.viz.wsUrl", wsUrl);
     localStorage.setItem("sg.viz.token", token);
     localStorage.setItem("sg.viz.sessionKey", sessionKey);
     gw.connect(wsUrl.trim(), token.trim(), sessionKey.trim());
   }, [gw, sessionKey, token, wsUrl]);
+
+  const onRefreshConfig = useCallback(async () => {
+    setPolicyBusy(true);
+    try {
+      const res = await gw.sendReadonly("config.get", {});
+      setConfigPayload(res);
+    } catch {
+      /* ignore — user sees stale value */
+    } finally {
+      setPolicyBusy(false);
+    }
+  }, [gw]);
+
+  const onRefreshCatalog = useCallback(async () => {
+    setPolicyBusy(true);
+    try {
+      const res = await gw.sendReadonly("tools.catalog", {});
+      setCatalogPayload(res);
+    } catch {
+      /* ignore */
+    } finally {
+      setPolicyBusy(false);
+    }
+  }, [gw]);
 
   return (
     <div className="app-shell">
@@ -62,6 +91,15 @@ export function App() {
         <button
           type="button"
           role="tab"
+          aria-selected={tab === "policy"}
+          className={tab === "policy" ? "app-tab active" : "app-tab"}
+          onClick={() => setTab("policy")}
+        >
+          정책
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={tab === "sentinel"}
           className={tab === "sentinel" ? "app-tab active" : "app-tab"}
           onClick={() => setTab("sentinel")}
@@ -89,6 +127,16 @@ export function App() {
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} />
+          </section>
+
+          <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
+            <StagePolicy
+              configPayload={configPayload}
+              catalogPayload={catalogPayload}
+              onRefreshConfig={() => void onRefreshConfig()}
+              onRefreshCatalog={() => void onRefreshCatalog()}
+              busy={policyBusy}
+            />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "sentinel"}>

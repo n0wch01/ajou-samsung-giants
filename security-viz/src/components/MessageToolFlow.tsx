@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 
@@ -186,16 +188,35 @@ function shouldCaptureAssistantText(role: string): boolean {
   return true;
 }
 
+/** 마지막 비어있지 않은 줄 — 두 응답의 마지막 줄이 같으면 같은 응답으로 판단 */
+function lastMeaningfulLine(s: string): string {
+  const lines = s.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i].trim();
+    if (l) return l;
+  }
+  return s.trim();
+}
+
+function isSameResponse(a: string, b: string): boolean {
+  if (a === b) return true;
+  if (a.includes(b) || b.includes(a)) return true;
+  // 마지막 줄이 같고 10자 이상이면 같은 응답
+  const la = lastMeaningfulLine(a);
+  const lb = lastMeaningfulLine(b);
+  if (la.length >= 10 && la === lb) return true;
+  return false;
+}
+
 function pushAssistantChunk(chunks: string[], raw: string): void {
   const t = raw.trim();
   if (!t) return;
-  const last = chunks[chunks.length - 1];
-  if (last !== undefined) {
-    if (t.startsWith(last)) {
-      chunks[chunks.length - 1] = t;
+  for (let i = 0; i < chunks.length; i++) {
+    if (isSameResponse(chunks[i], t)) {
+      // 같은 응답이면 더 긴 쪽 유지
+      if (t.length > chunks[i].length) chunks[i] = t;
       return;
     }
-    if (last.startsWith(t)) return;
   }
   chunks.push(t);
 }
@@ -684,10 +705,28 @@ function buildChatTurns(entries: TimelineEntry[]): {
     }
   }
   if (current) turns.push(current);
+
+  function finalizeChunks(chunks: string[]): string[] {
+    const out: string[] = [];
+    for (const t of chunks) {
+      const idx = out.findIndex((r) => isSameResponse(r, t));
+      if (idx >= 0) {
+        if (t.length > out[idx].length) out[idx] = t;
+      } else {
+        out.push(t);
+      }
+    }
+    return out;
+  }
+
   return {
-    turns: turns.map((t) => ({ ...t, tools: finalizeToolRows(t.tools) })),
+    turns: turns.map((t) => ({
+      ...t,
+      tools: finalizeToolRows(t.tools),
+      assistantChunks: finalizeChunks(t.assistantChunks),
+    })),
     orphanTools: finalizeToolRows(orphanTools),
-    orphanAssistantChunks,
+    orphanAssistantChunks: finalizeChunks(orphanAssistantChunks),
   };
 }
 
@@ -723,7 +762,11 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
           <div className="kakao-orphan">
             <div className="kakao-orphan-label">사용자 메시지 이전 답변</div>
             <div className="kakao-row-assistant">
-              <div className="kakao-bubble-assistant">{orphanAssistantChunks.join("\n\n")}</div>
+              <div className="kakao-bubble-assistant kakao-bubble-md">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {orphanAssistantChunks.join("\n\n")}
+                </ReactMarkdown>
+              </div>
             </div>
           </div>
         ) : null}
@@ -765,7 +808,11 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
             </div>
             {turn.assistantChunks.length > 0 ? (
               <div className="kakao-row-assistant kakao-row-assistant-after-tools">
-                <div className="kakao-bubble-assistant">{turn.assistantChunks.join("\n\n")}</div>
+                <div className="kakao-bubble-assistant kakao-bubble-md">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {turn.assistantChunks.join("\n\n")}
+                  </ReactMarkdown>
+                </div>
               </div>
             ) : null}
           </div>

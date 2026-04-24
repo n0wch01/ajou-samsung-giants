@@ -356,6 +356,126 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        if (url === "/api/sentinel/tools-diff" && req.method === "GET") {
+          const baselinePath = defaultBaselinePath();
+          const tracePath = defaultTracePath();
+
+          let baselineNames: string[] = [];
+          try {
+            const raw = fs.readFileSync(baselinePath, "utf8");
+            const parsed = JSON.parse(raw) as { tool_names?: unknown };
+            if (Array.isArray(parsed.tool_names)) {
+              baselineNames = parsed.tool_names.filter((x): x is string => typeof x === "string");
+            }
+          } catch {
+            /* baseline not found — empty */
+          }
+
+          // tools.effective is preferred; fall back to tools.catalog if effective is empty
+          let currentNamesEffective: string[] = [];
+          let currentNamesCatalog: string[] = [];
+          try {
+            const lines = fs.readFileSync(tracePath, "utf8").split("\n").filter(Boolean);
+            for (const line of lines) {
+              try {
+                const rec = JSON.parse(line) as {
+                  entry_type?: string;
+                  rpc_method?: string;
+                  payload_summary?: { tool_names?: unknown };
+                };
+                if (rec.entry_type !== "tools_snapshot") continue;
+                const names = rec.payload_summary?.tool_names;
+                if (!Array.isArray(names) || names.length === 0) continue;
+                const filtered = names.filter((x): x is string => typeof x === "string");
+                if (rec.rpc_method === "tools.effective") {
+                  currentNamesEffective = filtered;
+                } else if (rec.rpc_method === "tools.catalog") {
+                  currentNamesCatalog = filtered;
+                }
+              } catch {
+                /* skip malformed line */
+              }
+            }
+          } catch {
+            /* trace not found */
+          }
+          const currentNames = currentNamesEffective.length > 0 ? currentNamesEffective : currentNamesCatalog;
+
+          const baselineSet = new Set(baselineNames);
+          const currentSet = new Set(currentNames);
+          const added = currentNames.filter((n) => !baselineSet.has(n));
+          const removed = baselineNames.filter((n) => !currentSet.has(n));
+
+          sendJson(res, 200, {
+            ok: true,
+            baselinePath,
+            tracePath,
+            baseline: baselineNames,
+            current: currentNames,
+            added,
+            removed,
+          });
+          return;
+        }
+
+        if (url === "/api/sentinel/abort" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const wsUrl = String(body.wsUrl ?? "").trim();
+          const token = String(body.token ?? "").trim();
+          const sessionKey = String(body.sessionKey ?? "").trim();
+          if (!wsUrl || !token || !sessionKey) {
+            sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey가 필요합니다." });
+            return;
+          }
+          const abortPy = path.join(REPO_ROOT, "scripts", "sentinel", "abort.py");
+          if (!fs.existsSync(abortPy)) {
+            sendJson(res, 500, { ok: false, message: `abort.py not found: ${abortPy}` });
+            return;
+          }
+          const py = pickPython();
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            OPENCLAW_GATEWAY_WS_URL: wsUrl,
+            OPENCLAW_GATEWAY_TOKEN: token,
+            OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
+          };
+          try {
+            const { stdout, stderr } = await execFileAsync(py, [abortPy], {
+              cwd: REPO_ROOT,
+              env,
+              maxBuffer: 4 * 1024 * 1024,
+              timeout: 30_000,
+            });
+            const text = String(stdout ?? "").trim();
+            let parsed: unknown;
+            try {
+              parsed = text ? (JSON.parse(text) as unknown) : null;
+            } catch {
+              parsed = null;
+            }
+            const gw = parsed as { ok?: boolean; error?: { message?: string } } | null;
+            if (gw && gw.ok === false) {
+              sendJson(res, 200, {
+                ok: false,
+                message: gw.error?.message ?? "sessions.abort returned ok:false",
+                gateway: parsed,
+                stderrTail: String(stderr ?? "").slice(-1200),
+              });
+              return;
+            }
+            sendJson(res, 200, { ok: true, gateway: parsed, stderrTail: String(stderr ?? "").slice(-600) });
+          } catch (e) {
+            const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+            sendJson(res, 500, {
+              ok: false,
+              message: err.message ?? String(e),
+              stderrTail: (err.stderr ?? "").toString().slice(-1200),
+            });
+          }
+          return;
+        }
+
         sendJson(res, 404, { ok: false, message: "unknown sentinel route" });
       });
 

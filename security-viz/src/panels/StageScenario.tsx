@@ -128,16 +128,33 @@ export function StageScenario(props: StageScenarioProps) {
       </p>
 
       <div className="field" style={{ marginTop: 12 }}>
-        <label htmlFor="scen-override">메시지 덮어쓰기 (선택, 비우면 각 시나리오 기본값)</label>
-        <textarea
-          id="scen-override"
-          className="scenario-textarea"
-          rows={3}
-          spellCheck={false}
-          placeholder="비워 두면 카탈로그 기본 메시지로 전송됩니다."
-          value={overrideMessage}
-          onChange={(e) => setOverrideMessage(e.target.value)}
-        />
+        {SCENARIO_REGISTRY.filter((s) => s.messageVariants && s.status === "active").map((s) => (
+          <div key={s.id}>
+            <span className="muted" style={{ fontSize: "0.78rem", marginRight: 6 }}>{s.id} 메시지 선택:</span>
+            <div className="variant-btn-row">
+              {s.messageVariants!.map((v) => (
+                <button
+                  key={v.label}
+                  type="button"
+                  className={`variant-btn${overrideMessage === v.message ? " variant-btn-active" : ""}`}
+                  onClick={() => setOverrideMessage(overrideMessage === v.message ? "" : v.message)}
+                  title={v.message}
+                >
+                  {v.label}
+                </button>
+              ))}
+            </div>
+            {overrideMessage ? (
+              <p className="muted" style={{ fontSize: "0.78rem", marginTop: 6 }}>
+                선택된 메시지: {overrideMessage}
+              </p>
+            ) : (
+              <p className="muted" style={{ fontSize: "0.78rem", marginTop: 6 }}>
+                선택 없으면 각 시나리오 기본 메시지로 전송됩니다.
+              </p>
+            )}
+          </div>
+        ))}
       </div>
 
       <div className="scenario-card-grid">

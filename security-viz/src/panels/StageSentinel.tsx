@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useId } from "react";
 
 export type SentinelStatusPayload = {
   controlAvailable: boolean;
@@ -29,6 +29,9 @@ export function StageSentinel(props: StageSentinelProps) {
   const [controlMissing, setControlMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [localHint, setLocalHint] = useState<string | null>(null);
+  const [abortOpen, setAbortOpen] = useState(false);
+  const [abortBusy, setAbortBusy] = useState(false);
+  const dialogId = useId();
   const pollRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
@@ -99,6 +102,36 @@ export function StageSentinel(props: StageSentinelProps) {
       setBusy(false);
     }
   }, [refresh]);
+
+  const onAbortConfirm = useCallback(async () => {
+    const ws = props.wsUrl.trim();
+    const tok = props.token.trim();
+    const key = props.sessionKey.trim();
+    if (!ws || !tok || !key) {
+      setLocalHint("sessions.abort에는 WebSocket URL, 토큰, 세션 키가 모두 필요합니다.");
+      setAbortOpen(false);
+      return;
+    }
+    setAbortBusy(true);
+    try {
+      const res = await fetch("/api/sentinel/abort", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wsUrl: ws, token: tok, sessionKey: key }),
+      });
+      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+      setLocalHint(
+        j.ok
+          ? `sessions.abort 전송 완료 (세션: ${key})`
+          : `sessions.abort 실패: ${j.message ?? res.status}`,
+      );
+    } catch (e) {
+      setLocalHint(e instanceof Error ? e.message : "abort 요청 실패");
+    } finally {
+      setAbortBusy(false);
+      setAbortOpen(false);
+    }
+  }, [props.sessionKey, props.token, props.wsUrl]);
 
   useEffect(() => {
     if (!localHint) return;
@@ -186,7 +219,47 @@ export function StageSentinel(props: StageSentinelProps) {
             <button type="button" disabled={busy} onClick={() => void refresh()}>
               상태 새로고침
             </button>
+            <button
+              type="button"
+              className="abort-btn"
+              disabled={abortBusy}
+              onClick={() => setAbortOpen(true)}
+              title="sessions.abort — 에이전트 세션을 즉시 중단합니다"
+            >
+              세션 강제 중단 (abort)
+            </button>
           </div>
+
+          {abortOpen && (
+            <dialog
+              open
+              aria-labelledby={dialogId}
+              className="abort-dialog"
+              onKeyDown={(e) => { if (e.key === "Escape") setAbortOpen(false); }}
+            >
+              <h3 id={dialogId}>sessions.abort 실행 확인</h3>
+              <p>
+                <strong>sessions.abort</strong>를 전송하면 OpenClaw 에이전트 세션이 즉시 중단됩니다.
+                진행 중인 작업은 취소되고 복구되지 않을 수 있습니다.
+              </p>
+              <p className="muted" style={{ fontSize: "0.82rem" }}>
+                세션 키: <code>{props.sessionKey || "—"}</code>
+              </p>
+              <div className="row" style={{ marginTop: 12, justifyContent: "flex-end" }}>
+                <button type="button" disabled={abortBusy} onClick={() => setAbortOpen(false)}>
+                  취소
+                </button>
+                <button
+                  type="button"
+                  className="abort-btn"
+                  disabled={abortBusy}
+                  onClick={() => void onAbortConfirm()}
+                >
+                  {abortBusy ? "전송 중…" : "sessions.abort 실행"}
+                </button>
+              </div>
+            </dialog>
+          )}
 
           {status?.stderrTail?.trim() ? (
             <details className="sentinel-logs">

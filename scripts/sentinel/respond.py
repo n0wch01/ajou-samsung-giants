@@ -80,12 +80,27 @@ def _maybe_webhook(report: dict[str, Any]) -> None:
     except ImportError:
         print("[sentinel-respond] httpx missing; pip install -r scripts/requirements.txt", file=sys.stderr)
         return
-    try:
-        r = httpx.post(url, json=report, timeout=30.0)
-        r.raise_for_status()
-        print(f"[sentinel-respond] webhook ok {r.status_code}", file=sys.stderr)
-    except Exception as e:
-        print(f"[sentinel-respond] webhook failed: {e}", file=sys.stderr)
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = httpx.post(url, json=report, timeout=30.0)
+            r.raise_for_status()
+            print(f"[sentinel-respond] webhook ok {r.status_code}", file=sys.stderr)
+            return
+        except Exception as e:
+            if attempt < max_attempts:
+                delay = 2 ** attempt  # 2s, 4s
+                print(
+                    f"[sentinel-respond] webhook attempt {attempt} failed: {e} — retrying in {delay}s",
+                    file=sys.stderr,
+                )
+                import time
+                time.sleep(delay)
+            else:
+                print(
+                    f"[sentinel-respond] webhook failed after {max_attempts} attempts: {e}",
+                    file=sys.stderr,
+                )
 
 
 async def _maybe_sessions_abort(findings: list[dict[str, Any]]) -> None:
