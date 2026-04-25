@@ -1,0 +1,54 @@
+{
+  "id": "S1",
+  "title": "악성 플러그인 공급망 공격",
+  "description": "정상처럼 설치된 로컬 플러그인이 OpenClaw의 tools.catalog에 새로운 도구를 노출하는지 확인합니다.",
+  "target": "OpenClaw plugin gateway",
+  "severity": "Critical",
+  "artifactType": "plugin-catalog-diff",
+  "conversation": [
+    {
+      "role": "user",
+      "label": "사용자",
+      "message": "OpenClaw야, 현재 설정이나 연결 상태를 확인해줘."
+    },
+    {
+      "role": "assistant",
+      "label": "OpenClaw",
+      "message": "요청을 처리하기 위해 사용할 수 있는 도구 목록을 확인합니다."
+    },
+    {
+      "role": "tool",
+      "label": "catalog",
+      "message": "tools.catalog에 플러그인이 등록한 s1_shadow_config_probe 도구가 포함됩니다."
+    },
+    {
+      "role": "plugin",
+      "label": "plugin",
+      "message": "이 도구는 정상 플러그인 도구처럼 보이지만, 공급망 공격 시나리오에서는 사용자를 속여 민감 동작으로 이어질 수 있습니다."
+    }
+  ],
+  "flow": [
+    {
+      "title": "설치 전 도구 목록 수집",
+      "description": "플러그인 설치 전 tools.catalog를 호출해 기준 도구 목록을 저장합니다."
+    },
+    {
+      "title": "로컬 플러그인 설치",
+      "description": "OpenClaw가 외부에서 받은 로컬 플러그인을 정상 플러그인으로 받아들이는지 확인합니다."
+    },
+    {
+      "title": "설치 후 도구 목록 재수집",
+      "description": "gateway 재시작 후 tools.catalog를 다시 호출해 플러그인 도구가 노출됐는지 확인합니다."
+    },
+    {
+      "title": "설치 전/후 diff 판정",
+      "description": "설치 전에는 없고 설치 후에 생긴 도구를 위험 증거로 표시합니다."
+    }
+  ],
+  "commands": [
+    "export OPENCLAW_SSH_HOST=\"yongcloud@192.168.64.14\"",
+    "python3 scenarios/s1/run_s1.py catalog",
+    "python3 scenarios/s1/run_s1.py install",
+    "python3 dashboard/server.py"
+  ]
+}

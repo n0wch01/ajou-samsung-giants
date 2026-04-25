@@ -4,6 +4,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -172,7 +173,39 @@ def remove_prior_test_install_if_needed() -> None:
     if not OPENCLAW_SSH_HOST:
         return
     log(f"clear prior test install files: {PLUGIN_ID}")
-    run_remote_shell(f"rm -rf ~/.openclaw/extensions/{shlex.quote(PLUGIN_ID)}")
+    plugin_json = json.dumps(PLUGIN_ID)
+    run_remote_shell(
+        "python3 - <<'PY'\n"
+        "import json\n"
+        "from pathlib import Path\n"
+        f"plugin_id = {plugin_json}\n"
+        "prefixes = {plugin_id, 's1-search-enhanced', 's1-search-enhance'}\n"
+        "home = Path.home()\n"
+        "for base in [home / '.openclaw', home / '.openclaw-s1-lab']:\n"
+        "    ext_dir = base / 'extensions'\n"
+        "    if ext_dir.exists():\n"
+        "        for child in ext_dir.iterdir():\n"
+        "            if any(child.name.startswith(prefix) for prefix in prefixes):\n"
+        "                if child.is_dir():\n"
+        "                    import shutil\n"
+        "                    shutil.rmtree(child, ignore_errors=True)\n"
+        "                else:\n"
+        "                    child.unlink(missing_ok=True)\n"
+        "    config_path = base / 'openclaw.json'\n"
+        "    if not config_path.exists():\n"
+        "        continue\n"
+        "    cfg = json.loads(config_path.read_text())\n"
+        "    plugins = cfg.get('plugins')\n"
+        "    if isinstance(plugins, dict):\n"
+        "        for section in ['entries', 'installs']:\n"
+        "            values = plugins.get(section)\n"
+        "            if isinstance(values, dict):\n"
+        "                for key in list(values):\n"
+        "                    if any(key.startswith(prefix) for prefix in prefixes):\n"
+        "                        values.pop(key, None)\n"
+        "    config_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + '\\n')\n"
+        "PY"
+    )
 
 
 def write_artifact(name: str, data: Any) -> Path:
@@ -239,17 +272,23 @@ def dump_catalog() -> None:
 
 
 def install_plugin_and_diff_catalog() -> None:
+    remove_prior_test_install_if_needed()
+    if OPENCLAW_SSH_HOST:
+        log("restart gateway after clearing prior install")
+        run_openclaw("gateway", "restart")
+        time.sleep(3)
+
     log("dump tools.catalog before install")
     before_catalog = gateway_call("tools.catalog")
     before_plugin_tools = extract_plugin_tools(before_catalog)
     before_ids = {tool["id"] for tool in before_plugin_tools}
 
-    remove_prior_test_install_if_needed()
     plugin_path = sync_plugin_to_remote_if_needed()
     log(f"install plugin from {plugin_path}")
     install_output = run_openclaw("plugins", "install", plugin_path)
     log("restart gateway")
     run_openclaw("gateway", "restart")
+    time.sleep(3)
 
     log("dump tools.catalog after install")
     after_catalog = gateway_call("tools.catalog")
