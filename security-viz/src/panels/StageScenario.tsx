@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath } from "../lib/publicAsset";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
-import { SCENARIO_REGISTRY, type ScenarioEntry } from "../scenarioRegistry";
+import { SCENARIO_REGISTRY, S1_DEFAULT_SCENARIO_MESSAGE, type ScenarioEntry } from "../scenarioRegistry";
 
 export type StageScenarioProps = {
   wsUrl: string;
@@ -132,7 +132,8 @@ async function managePlugin(action: "install" | "uninstall"): Promise<{ ok: bool
 }
 
 export function StageScenario(props: StageScenarioProps) {
-  const [overrideMessage, setOverrideMessage] = useState("");
+  /** S1 첫 시도: `권장 기본 — 2단계 명시`와 동일한 SSOT 문구를 기본 선택 */
+  const [overrideMessage, setOverrideMessage] = useState(S1_DEFAULT_SCENARIO_MESSAGE);
   const [hint, setHint] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -149,17 +150,18 @@ export function StageScenario(props: StageScenarioProps) {
   }, [hint]);
 
   const checkPlugin = useCallback(
-    async (entry: ScenarioEntry) => {
-      if (!entry.requiredTools?.length) return;
+    async (entry: ScenarioEntry): Promise<PluginStatus | undefined> => {
+      if (!entry.requiredTools?.length) return undefined;
       const ws = props.wsUrl.trim();
       const tok = props.token.trim();
-      if (!ws || !tok) return;
-      if (checkingRef.current[entry.id]) return;
+      if (!ws || !tok) return undefined;
+      if (checkingRef.current[entry.id]) return undefined;
       checkingRef.current[entry.id] = true;
       setPluginStatuses((prev) => ({ ...prev, [entry.id]: { state: "checking", foundTools: [], missingTools: [] } }));
       const status = await checkPluginStatus(ws, tok, entry.requiredTools);
       checkingRef.current[entry.id] = false;
       setPluginStatuses((prev) => ({ ...prev, [entry.id]: status }));
+      return status;
     },
     [props.wsUrl, props.token],
   );
@@ -182,7 +184,11 @@ export function StageScenario(props: StageScenarioProps) {
       const ws = props.wsUrl.trim();
       const tok = props.token.trim();
       const key = props.sessionKey.trim();
-      const body = (overrideMessage.trim() || entry.defaultMessage || "").trim();
+      const body = (
+        entry.id === "S1"
+          ? (overrideMessage.trim() || entry.defaultMessage || "")
+          : (entry.defaultMessage || "")
+      ).trim();
       if (!ws || !tok || !key || !body) {
         setHint("gateway 패널에서 WebSocket URL·토큰·세션 키를 채운 뒤 다시 시도하세요.");
         return;
@@ -191,8 +197,12 @@ export function StageScenario(props: StageScenarioProps) {
         setHint("이 시나리오는 아직 planned 입니다.");
         return;
       }
+      // 확인 전(idle/checking)에 실행 누르면 stale 상태로 보내질 수 있어 먼저 tools.catalog 동기화
+      let ps: PluginStatus | undefined = pluginStatuses[entry.id];
+      if (entry.requiredTools?.length && (!ps || ps.state === "idle" || ps.state === "checking")) {
+        ps = await checkPlugin(entry);
+      }
       // 플러그인 미설치 시 자동 설치
-      const ps = pluginStatuses[entry.id];
       if (entry.requiredTools?.length && ps?.state === "missing") {
         setHint("플러그인 자동 설치 중…");
         setManagingPlugin("install");
@@ -202,8 +212,15 @@ export function StageScenario(props: StageScenarioProps) {
           setHint(`플러그인 설치 실패: ${installResult.message}`);
           return;
         }
-        setHint("플러그인 설치 완료. 시나리오 실행 중…");
-        await checkPlugin(entry);
+        const afterInstall = await checkPlugin(entry);
+        if (afterInstall?.state !== "ok") {
+          setHint(
+            "설치·allow 반영·게이트웨이 재시작까지 완료했지만 tools.catalog에 util_* 도구가 아직 없습니다. " +
+              "게이트웨이 연결 상태를 확인한 뒤 「재확인」하고 다시 실행하세요.",
+          );
+          return;
+        }
+        setHint("플러그인 반영 확인됨. 시나리오 실행 중…");
       }
 
       abortRef.current?.abort();
@@ -253,8 +270,14 @@ export function StageScenario(props: StageScenarioProps) {
         [entry.id]: { state: "missing", foundTools: [], missingTools: entry.requiredTools ?? [] },
       }));
     } else {
-      setHint("설치 완료. 상태를 확인합니다…");
-      await checkPlugin(entry);
+      const st = await checkPlugin(entry);
+      if (st?.state !== "ok") {
+        setHint(
+          "설치·allow 반영·게이트웨이 재시작이 끝났지만 카탈로그에 도구가 아직 없습니다. 연결 상태 확인 후「재확인」하세요.",
+        );
+      } else {
+        setHint("설치 완료(allow 반영 + 게이트웨이 재시작). 도구가 카탈로그에 반영되었습니다.");
+      }
     }
   }, [checkPlugin]);
 
@@ -264,30 +287,6 @@ export function StageScenario(props: StageScenarioProps) {
     <div className="panel scenario-panel scenario-panel-v2">
       <h2>시나리오 테스트</h2>
       <GuardrailBar wsUrl={props.wsUrl} token={props.token} />
-      <div className="field" style={{ marginTop: 12 }}>
-        {SCENARIO_REGISTRY.filter((s) => s.messageVariants && s.status === "active").map((s) => (
-          <div key={s.id}>
-            <div className="variant-btn-row">
-              {s.messageVariants!.map((v) => (
-                <button
-                  key={v.label}
-                  type="button"
-                  className={`variant-btn${overrideMessage === v.message ? " variant-btn-active" : ""}`}
-                  onClick={() => setOverrideMessage(overrideMessage === v.message ? "" : v.message)}
-                  title={v.message}
-                >
-                  {v.label}
-                </button>
-              ))}
-            </div>
-            {overrideMessage ? (
-              <p className="muted" style={{ fontSize: "0.78rem", marginTop: 6 }}>
-                {overrideMessage}
-              </p>
-            ) : null}
-          </div>
-        ))}
-      </div>
 
       <div className="scenario-card-grid">
         {SCENARIO_REGISTRY.map((s) => {
@@ -302,6 +301,28 @@ export function StageScenario(props: StageScenarioProps) {
               </div>
               <div className="scenario-card-title">{s.title}</div>
               <code className="scenario-card-path">{s.docPath}</code>
+              {s.id === "S1" && s.messageVariants?.length ? (
+                <div className="field" style={{ marginTop: 10 }}>
+                  <div className="variant-btn-row">
+                    {s.messageVariants.map((v) => (
+                      <button
+                        key={v.label}
+                        type="button"
+                        className={`variant-btn${overrideMessage === v.message ? " variant-btn-active" : ""}`}
+                        onClick={() => setOverrideMessage(overrideMessage === v.message ? "" : v.message)}
+                        title={v.message}
+                      >
+                        {v.label}
+                      </button>
+                    ))}
+                  </div>
+                  {overrideMessage ? (
+                    <p className="muted" style={{ fontSize: "0.78rem", marginTop: 6 }}>
+                      {overrideMessage}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               {ps !== null && (
                 <div className="plugin-status-row">
@@ -372,6 +393,36 @@ export function StageScenario(props: StageScenarioProps) {
                   {busy ? "전송 중…" : managingPlugin === "install" ? "설치 후 실행 중…" : "이 시나리오 실행"}
                 </button>
               </div>
+              {s.id === "S1" && (
+                <details className="scenario-s1-playbook">
+                  <summary>S1 운영 체크리스트</summary>
+                  <ol className="scenario-s1-playbook-list">
+                    <li>
+                      <strong>게이트웨이</strong>가 WebSocket URL(예: <code>ws://127.0.0.1:18789</code>)에서 떠 있는지 확인한 뒤,
+                      왼쪽 패널에서 Connect.
+                    </li>
+                    <li>
+                      <strong>플러그인 설치 버튼</strong>은 설치 후 <code>plugins.allow</code> / <code>plugins.entries</code> 보정과 게이트웨이
+                      재시작까지 자동으로 수행(
+                      <code>mock-malicious-plugin/README.md</code>).
+                    </li>
+                    <li>
+                      <strong>플러그인 제거 버튼</strong>은 확장 디렉터리와 <code>plugins.entries</code> / <code>plugins.installs</code> /
+                      <code>plugins.allow</code>에서 <code>workspace-utils</code>를 함께 정리한다.
+                    </li>
+                    <li>
+                      <strong>L1</strong>: 정책 탭에서 <code>tools.catalog</code>에 <code>util_*</code> 플러그인 툴 증가.
+                    </li>
+                    <li>
+                      <strong>L2/L3</strong>: 채팅 타임라인·<code>session.tool</code> — 체인이 약하면 시나리오 탭의「툴 이름 명시」또는 영어 변형 프롬프트 사용.
+                    </li>
+                    <li>
+                      문서 SSOT: 저장소 <code>scenarios/s1-plugin-supply-chain.md</code> — <code>[S1_MOCK]</code>·<code>s1_chain</code>은 랩 스텁
+                      텔레메트리.
+                    </li>
+                  </ol>
+                </details>
+              )}
             </div>
           );
         })}

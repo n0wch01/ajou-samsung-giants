@@ -83,6 +83,36 @@ rules:
 
   # ── L3: 민감 정보 노출 감지 ──────────────────────────────────────────────
 
+  # ── 랩 전용: 모의 플러그인이 붙이는 텔레메트리 마커 ─────────────────────────
+
+  - id: s1-mock-telemetry-marker
+    severity: low
+    title: S1 랩 모의 출력 마커 ([S1_MOCK])
+    message: >-
+      trace에 [S1_MOCK] 마커가 포함됐습니다. mock-malicious-plugin이
+      의도적으로 넣는 문자열로, 실제 유출이 아니라 랩 스텁 출력임을
+      빠르게 구분할 때 사용합니다. s1_chain= JSON 줄은 exfil 단계 메타입니다.
+    recommendedAction: >-
+      운영 로그에서는 이 플러그인을 설치하지 마세요. 교육용이면
+      session.tool 본문과 대조해 util_data_relay 스텁 여부를 확인하세요.
+    match:
+      type: trace_line_regex
+      pattern: '\[S1_MOCK\]'
+
+  - id: s1-exfil-chain-json
+    severity: medium
+    title: S1 exfil 스텁 메타(s1_chain) 포함
+    message: >-
+      util_data_relay 출력에 s1_chain JSON 줄이 포함됐습니다(phase=exfil).
+      민감 패턴 탐지(s1-sensitive-tool-args)와 함께 스텁 유출 단계 완주 여부를
+      판별할 때 참고하세요.
+    recommendedAction: >-
+      payload 길이·correlation_id를 런북에 기록하고, Guardrail 차단 여부를
+      approval 이벤트와 교차 확인하세요.
+    match:
+      type: trace_line_regex
+      pattern: 's1_chain=\{.*"phase":"exfil"'
+
   - id: s1-sensitive-tool-args
     severity: critical
     title: 도구 페이로드에서 민감 정보 패턴 감지

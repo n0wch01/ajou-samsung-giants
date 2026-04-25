@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { execFile, execSync, spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
@@ -88,6 +89,75 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
+}
+
+function resolveUserPath(input: string): string {
+  const trimmed = input.trim();
+  if (trimmed.startsWith("~/")) {
+    return path.join(os.homedir(), trimmed.slice(2));
+  }
+  return path.resolve(trimmed);
+}
+
+function resolveOpenClawConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = env.OPENCLAW_CONFIG_PATH?.trim();
+  if (explicit) {
+    return resolveUserPath(explicit);
+  }
+  const stateDir = env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    return path.join(resolveUserPath(stateDir), "openclaw.json");
+  }
+  return path.join(os.homedir(), ".openclaw", "openclaw.json");
+}
+
+function ensurePluginAllowedAndEnabled(configPath: string, pluginId: string): { updated: boolean } {
+  let changed = false;
+  let cfg: Record<string, unknown> = {};
+  if (fs.existsSync(configPath)) {
+    const raw = fs.readFileSync(configPath, "utf8").trim();
+    cfg = raw ? (JSON.parse(raw) as Record<string, unknown>) : {};
+  } else {
+    fs.mkdirSync(path.dirname(configPath), { recursive: true });
+    changed = true;
+  }
+
+  const pluginsValue = cfg.plugins;
+  const plugins =
+    pluginsValue && typeof pluginsValue === "object" && !Array.isArray(pluginsValue)
+      ? ({ ...pluginsValue } as Record<string, unknown>)
+      : {};
+
+  const allowValue = plugins.allow;
+  const allow = Array.isArray(allowValue) ? allowValue.filter((v): v is string => typeof v === "string") : [];
+  if (!allow.includes(pluginId)) {
+    allow.push(pluginId);
+    changed = true;
+  }
+  plugins.allow = allow;
+
+  const entriesValue = plugins.entries;
+  const entries =
+    entriesValue && typeof entriesValue === "object" && !Array.isArray(entriesValue)
+      ? ({ ...entriesValue } as Record<string, unknown>)
+      : {};
+  const existingEntry = entries[pluginId];
+  const entry =
+    existingEntry && typeof existingEntry === "object" && !Array.isArray(existingEntry)
+      ? ({ ...existingEntry } as Record<string, unknown>)
+      : {};
+  if (entry.enabled !== true) {
+    entry.enabled = true;
+    changed = true;
+  }
+  entries[pluginId] = entry;
+  plugins.entries = entries;
+  cfg.plugins = plugins;
+
+  if (changed) {
+    fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+  }
+  return { updated: changed };
 }
 
 function killChild(): void {
@@ -237,21 +307,45 @@ export function sentinelControlPlugin(): Plugin {
           }
           if (action === "install") {
             try {
-              const { stdout, stderr } = await execFileAsync("openclaw", ["plugins", "install", pluginDir], {
+              const installResult = await execFileAsync("openclaw", ["plugins", "install", pluginDir], {
                 cwd: REPO_ROOT,
                 timeout: 30_000,
               });
-              sendJson(res, 200, { ok: true, action, stdout: stdout.trim(), stderr: stderr.trim() });
+
+              const configPath = resolveOpenClawConfigPath();
+              const allowResult = ensurePluginAllowedAndEnabled(configPath, pluginId);
+
+              const restartResult = await execFileAsync("openclaw", ["gateway", "restart"], {
+                cwd: REPO_ROOT,
+                timeout: 90_000,
+              });
+
+              sendJson(res, 200, {
+                ok: true,
+                action,
+                configPath,
+                allowEnsured: true,
+                configUpdated: allowResult.updated,
+                restartDone: true,
+                stdout: installResult.stdout.trim(),
+                stderr: installResult.stderr.trim(),
+                restartStdout: restartResult.stdout.trim(),
+                restartStderr: restartResult.stderr.trim(),
+              });
             } catch (e) {
               const err = e as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-              sendJson(res, 500, { ok: false, message: err.message ?? String(e), stderr: String(err.stderr ?? "").trim() });
+              sendJson(res, 500, {
+                ok: false,
+                message: err.message ?? String(e),
+                stderr: String(err.stderr ?? "").trim(),
+                stdout: String(err.stdout ?? "").trim(),
+              });
             }
           } else {
             // 제거: 디렉토리 삭제 + openclaw.json에서 등록 정보 제거
-            const os = await import("node:os");
             const home = os.homedir();
             const extDir = path.join(home, ".openclaw", "extensions", pluginId);
-            const configPath = path.join(home, ".openclaw", "openclaw.json");
+            const configPath = resolveOpenClawConfigPath();
             try {
               // 1) 확장 디렉토리 삭제
               if (fs.existsSync(extDir)) {
@@ -261,13 +355,22 @@ export function sentinelControlPlugin(): Plugin {
               if (fs.existsSync(configPath)) {
                 const raw = fs.readFileSync(configPath, "utf8");
                 const cfg = JSON.parse(raw) as Record<string, unknown>;
-                const plugins = (cfg.plugins ?? {}) as Record<string, Record<string, unknown>>;
+                const plugins = (cfg.plugins ?? {}) as Record<string, unknown>;
                 const entries = (plugins.entries ?? {}) as Record<string, unknown>;
                 const installs = (plugins.installs ?? {}) as Record<string, unknown>;
                 delete entries[pluginId];
                 delete installs[pluginId];
                 plugins.entries = entries;
                 plugins.installs = installs;
+                const allowValue = plugins.allow;
+                if (Array.isArray(allowValue)) {
+                  const nextAllow = allowValue.filter(
+                    (v) => !(typeof v === "string" && v === pluginId),
+                  );
+                  if (nextAllow.length !== allowValue.length) {
+                    plugins.allow = nextAllow;
+                  }
+                }
                 cfg.plugins = plugins;
                 fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
               }

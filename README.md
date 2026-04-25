@@ -53,6 +53,7 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 
 2. **대시보드 (security-viz)**  
    저장소 루트에서 `./run-viz.sh` 를 쓰면 (선택) `OPENCLAW_GATEWAY_WS_URL`·토큰이 있을 때 ingest와 Vite dev를 함께 띄웁니다. 수동으로는 `cd security-viz && npm install && npm run dev` 후 브라우저에서 연결·토큰 입력.
+   S1 시나리오 카드의 `플러그인 설치` 버튼은 `workspace-utils` 설치 뒤 `plugins.allow`/`plugins.entries`를 보정하고 `openclaw gateway restart`까지 자동 수행합니다. `플러그인 제거`는 확장 디렉터리와 `entries`/`installs`/`allow`에서 해당 id를 함께 정리합니다.
 
 3. **S1 랩 플러그인**  
    [mock-malicious-plugin/README.md](mock-malicious-plugin/README.md) — 공급망 시나리오용 **랩 전용** 목업 플러그인입니다.

@@ -301,6 +301,36 @@ button:disabled {
   font-weight: 600;
 }
 
+.scenario-s1-playbook {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(245, 200, 66, 0.06);
+  font-size: 0.8rem;
+}
+
+.scenario-s1-playbook > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.scenario-s1-playbook-list {
+  margin: 10px 0 0;
+  padding-left: 1.25rem;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.scenario-s1-playbook-list li {
+  margin-bottom: 6px;
+}
+
+.scenario-s1-playbook-list code {
+  font-size: 0.78em;
+}
+
 .scenario-panel .scenario-textarea {
   width: 100%;
   min-height: 120px;

@@ -12,7 +12,7 @@ SG 시나리오 **[S1: 악성 플러그인 공급망](../scenarios/s1-plugin-sup
 | 툴 이름 | 역할 |
 |---------|------|
 | `util_workspace_scan` | `.env`·설정 파일·git config 스캔 후 API 키, DB URL, 연결 정보 추출 |
-| `util_data_relay` | 스캔 결과를 로컬 observability 엔드포인트로 전달 (exfil 스텁) |
+| `util_data_relay` | 스캔 결과를 “observability”로 **흉내 내는** exfil 스텁(실제 HTTP 없음). 출력에 `[S1_MOCK]`, 한 줄 `s1_chain={...}` JSON, `correlation_id` 선택 인자 지원 |
 | `util_env_summary` | 환경 변수 목록 요약 반환 |
 
 ## 로컬 설치(고정 경로)
@@ -25,6 +25,17 @@ openclaw gateway restart
 ```
 
 설치 후 `tools.catalog` / `tools.effective`에서 `source: plugin`(또는 동등 필드)과 툴 이름 증분을 확인하고, Sentinel·런북 [../runbooks/pipeline-stages.md](../runbooks/pipeline-stages.md)에 따라 로그를 남긴다.
+
+## security-viz 시나리오 탭에서 설치/제거
+
+- `S1 > 플러그인 설치` 버튼은 아래를 자동으로 수행한다.
+  - `openclaw plugins install ./mock-malicious-plugin`
+  - 활성 `openclaw.json`의 `plugins.allow`에 `workspace-utils` 추가
+  - `plugins.entries.workspace-utils.enabled = true` 보정
+  - `openclaw gateway restart`
+- `S1 > 플러그인 제거` 버튼은 아래를 정리한다.
+  - `~/.openclaw/extensions/workspace-utils` 제거
+  - `openclaw.json`의 `plugins.entries` / `plugins.installs` / `plugins.allow`에서 `workspace-utils` 제거
 
 ## 추론
 
