@@ -21,6 +21,7 @@ REMOTE_PLUGIN_DIR = os.getenv("S1_REMOTE_PLUGIN_DIR", "/tmp/openclaw-s1/mock-mal
 PLUGIN_ID = os.getenv("S1_PLUGIN_ID", "s1-search-enhanced-v2")
 EXPECTED_PLUGIN_TOOL = os.getenv("S1_EXPECTED_TOOL", "s1_shadow_config_probe")
 RUN_INSTALL_STEP = os.getenv("S1_RUN_INSTALL") == "1"
+RUN_EFFECTIVE_STEP = os.getenv("S1_RUN_EFFECTIVE") == "1"
 
 ARTIFACT_DIR = Path(os.getenv("S1_ARTIFACT_DIR", Path(__file__).parent / "artifacts"))
 ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
@@ -197,6 +198,18 @@ def extract_plugin_tools(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return tools
 
 
+def extract_session_key(created: Any) -> str:
+    if isinstance(created, dict):
+        for container in (created, created.get("payload"), created.get("result")):
+            if isinstance(container, dict) and isinstance(container.get("key"), str):
+                return container["key"]
+    raise AssertionError(f"sessions.create did not return a session key: {created}")
+
+
+def is_unknown_method_error(exc: Exception) -> bool:
+    return "unknown method" in str(exc)
+
+
 def test_step1_dump_tools_catalog_before_plugin_install() -> None:
     log("dump tools.catalog before plugin install")
     catalog = gateway_call("tools.catalog")
@@ -239,8 +252,55 @@ def test_step2_install_local_plugin_and_diff_catalog() -> None:
     assert EXPECTED_PLUGIN_TOOL in added_ids
 
 
+def test_step3_verify_plugin_tool_is_effective() -> None:
+    log("create test session")
+    try:
+        created = gateway_call("sessions.create", {"label": "S1 plugin effective tool test"})
+    except AssertionError as exc:
+        if is_unknown_method_error(exc):
+            write_artifact(
+                "tools_effective_unsupported.json",
+                {
+                    "stage": "sessions.create",
+                    "reason": "The installed OpenClaw gateway does not support sessions.create.",
+                },
+            )
+            log("skip tools.effective check: sessions.create is not supported by this gateway")
+            return
+        raise
+    session_key = extract_session_key(created)
+
+    log(f"dump tools.effective for session {session_key}")
+    try:
+        effective = gateway_call("tools.effective", {"sessionKey": session_key})
+    except AssertionError as exc:
+        if is_unknown_method_error(exc):
+            write_artifact(
+                "tools_effective_unsupported.json",
+                {
+                    "stage": "tools.effective",
+                    "sessionKey": session_key,
+                    "reason": "The installed OpenClaw gateway does not support tools.effective.",
+                },
+            )
+            log("skip tools.effective check: tools.effective is not supported by this gateway")
+            return
+        raise
+    effective_plugin_tools = extract_plugin_tools(effective)
+    effective_ids = {tool["id"] for tool in effective_plugin_tools}
+
+    write_artifact("effective_session.json", {"sessionKey": session_key})
+    write_artifact("tools_effective.json", effective)
+    write_artifact("plugin_tools_effective.json", effective_plugin_tools)
+
+    assert EXPECTED_PLUGIN_TOOL in effective_ids
+
+
 if __name__ == "__main__":
-    if RUN_INSTALL_STEP:
+    if RUN_EFFECTIVE_STEP:
+        test_step3_verify_plugin_tool_is_effective()
+        print(f"Step 3 complete. Artifacts written to: {ARTIFACT_DIR}")
+    elif RUN_INSTALL_STEP:
         test_step2_install_local_plugin_and_diff_catalog()
         print(f"Step 2 complete. Artifacts written to: {ARTIFACT_DIR}")
     else:
