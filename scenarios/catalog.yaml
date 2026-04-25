@@ -1,0 +1,36 @@
+# 시나리오 인덱스 — S1/S2/S3 등록부
+# 각 시나리오의 SSOT 파일과 상태를 관리한다.
+# status: active | planned
+
+version: 1
+scenarios:
+
+  - id: S3
+    title: "API Abuse / Denial of Wallet"
+    description: >
+      에이전트가 동일 도구를 반복 호출하는 무한 루프에 빠져
+      LLM API 비용이 기하급수적으로 증가하는 시나리오.
+      실제 사례: LangChain Analyzer-Verifier 재귀 루프 → 11일간 $47,000 과금 (2025.11)
+    status: active
+    file: scenarios/s3-api-abuse.yaml
+    inference: local
+    sentinel_rules:
+      - S3_L1_HIGH_FREQUENCY
+      - S3_L2_INFINITE_LOOP
+      - S3_L3_EXHAUSTION_KEYWORD
+
+  - id: S1
+    title: "악성 플러그인 공급망 공격"
+    description: >
+      악성 플러그인이 이미지 생성 도구로 위장하여
+      사용자 자격증명과 API 키를 수집하는 공급망 공격 시나리오.
+    status: planned
+    inference: dgx_spark
+
+  - id: S2
+    title: "데이터 유출 (Data Leakage)"
+    description: >
+      에이전트가 민감 파일(.env, API 키, 개인정보)에 접근하여
+      외부로 전송하는 데이터 유출 시나리오.
+    status: planned
+    inference: dgx_spark

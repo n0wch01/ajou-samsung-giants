@@ -1,23 +1,60 @@
-rule_id: s3-rate-limit
-name: "API 호출 빈도 제한"
-description: "단위 시간 내 동일 도구 호출 횟수가 임계값을 초과하면 발화"
-threat_type: API Abuse / DoS
-severity: high
+# S3 — API Abuse / Denial of Wallet 탐지 규칙 세트
+# 팀 시나리오: 무한 도구 호출 루프를 통한 LLM API 비용 고갈
+# 실제 사례: LangChain Analyzer-Verifier 재귀 루프 → 11일간 $47,000 과금 (2025.11)
+#
+# L1: 고빈도 호출 (rate_limit)     — severity: high
+# L2: 무한 루프 (loop_detect)      — severity: critical
+# L3: 자원 고갈 키워드 (trace_line_regex) — severity: medium
 
-conditions:
-  # 슬라이딩 윈도우 내 동일 tool 호출 횟수
-  window_seconds: 30
-  max_calls: 10
+version: 1
+rules:
 
-  # 동일 인자로 반복 호출 (루프 탐지)
-  max_identical_consecutive: 5
+  # ── L1: 고빈도 API 호출 ──────────────────────────────────────────────────
+  - rule_id: S3_L1_HIGH_FREQUENCY
+    name: "고빈도 API 호출 (Rate Limit)"
+    description: >
+      슬라이딩 윈도우(30초) 내 동일 툴 호출이 10회를 초과하면 발화.
+      에이전트가 단기간에 과도하게 API를 호출하는 패턴을 탐지한다.
+    match_type: rate_limit
+    severity: high
+    conditions:
+      window_seconds: 30
+      max_calls: 10
+    message: "API Abuse 탐지: {tool}이 {window:.0f}초 내 {count}회 호출됨 (임계값: {max})"
+    recommendedAction: >
+      세션을 즉시 중단하고 입력 프롬프트를 검토하세요.
+      에이전트에 명시적 반복 횟수 제한 조건을 추가하세요.
+    actions:
+      on_warning:
+        threshold: 7
+        message: "도구 호출 빈도가 증가하고 있습니다 ({count}회/{window}초)"
 
-actions:
-  on_warning:
-    threshold: 7  # 경고 시작 기준
-    action: log_warning
-    message: "도구 호출 빈도가 증가하고 있습니다 ({count}회/{window}초)"
+  # ── L2: 무한 루프 (동일 인자 연속 호출) ───────────────────────────────────
+  - rule_id: S3_L2_INFINITE_LOOP
+    name: "무한 루프 (동일 인자 반복 호출)"
+    description: >
+      동일한 툴을 동일한 인자로 5회 연속 호출하면 발화.
+      에이전트가 종료 조건 없이 같은 작업을 반복하는 루프 패턴을 탐지한다.
+    match_type: loop_detect
+    severity: critical
+    conditions:
+      max_identical_consecutive: 5
+    message: "루프 탐지: {tool}이 동일 인자로 {count}회 연속 호출됨"
+    recommendedAction: >
+      세션을 즉시 중단하세요.
+      에이전트 시스템 프롬프트에 종료 조건 및 최대 반복 횟수를 명시하세요.
 
-  on_trigger:
-    action: abort_session
-    message: "API Abuse 탐지: {tool}이 {window}초 내 {count}회 호출됨 (임계값: {max})"
+  # ── L3: 자원 고갈 유발 키워드 ────────────────────────────────────────────
+  - rule_id: S3_L3_EXHAUSTION_KEYWORD
+    name: "자원 고갈 키워드 패턴"
+    description: >
+      프롬프트나 메시지에 무한 반복을 유도하는 표현이 포함된 경우 발화.
+      "완벽할 때까지 반복", "계속 재시도" 등의 위험 키워드를 탐지한다.
+    match_type: trace_line_regex
+    severity: medium
+    pattern: "(반복해|완벽할 때까지|무한|endless|infinite.loop|retry.forever|keep.trying|재시도|계속 해|다시 시도)"
+    ignore_case: true
+    message: "자원 고갈 유발 키워드 탐지: 프롬프트에 무한 반복 유도 표현이 포함됨"
+    recommendedAction: >
+      입력 프롬프트를 검토하세요.
+      반복 조건을 명시적으로 제한하고 종료 조건을 추가하세요.
