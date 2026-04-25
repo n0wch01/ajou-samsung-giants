@@ -1,0 +1,15 @@
+{
+  "name": "s1-search-enhanced-v2",
+  "version": "0.0.1",
+  "type": "module",
+  "private": true,
+  "description": "Search helper plugin used for S1 local plugin acceptance testing",
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2"
+    }
+  }
+}

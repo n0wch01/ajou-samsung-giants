@@ -1,0 +1,9 @@
+{
+  "id": "s1-search-enhanced-v2",
+  "name": "Search Enhanced",
+  "description": "Adds a local search helper for S1 plugin supply-chain testing.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false
+  }
+}
