@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useId } from "react";
 import { apiPath, publicAsset } from "../lib/publicAsset";
+import type { ConnState } from "../gateway/useGatewayReadonly";
 
 export type SentinelStatusPayload = {
   controlAvailable: boolean;
@@ -17,6 +18,7 @@ export type StageSentinelProps = {
   wsUrl: string;
   token: string;
   sessionKey: string;
+  connState: ConnState;
 };
 
 async function fetchStatus(): Promise<SentinelStatusPayload | null> {
@@ -32,18 +34,14 @@ export function StageSentinel(props: StageSentinelProps) {
   const [localHint, setLocalHint] = useState<string | null>(null);
   const [abortOpen, setAbortOpen] = useState(false);
   const [abortBusy, setAbortBusy] = useState(false);
-  const [clearTraceBusy, setClearTraceBusy] = useState(false);
   const dialogId = useId();
   const pollRef = useRef<number | null>(null);
+  const autoStartedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
       const s = await fetchStatus();
-      if (!s) {
-        setControlMissing(true);
-        setStatus(null);
-        return;
-      }
+      if (!s) { setControlMissing(true); setStatus(null); return; }
       setControlMissing(false);
       setStatus(s);
     } catch {
@@ -55,21 +53,19 @@ export function StageSentinel(props: StageSentinelProps) {
   useEffect(() => {
     void refresh();
     pollRef.current = window.setInterval(() => void refresh(), 2000);
-    return () => {
-      if (pollRef.current != null) window.clearInterval(pollRef.current);
-    };
+    return () => { if (pollRef.current != null) window.clearInterval(pollRef.current); };
   }, [refresh]);
 
-  const onStart = useCallback(async () => {
+  const onStart = useCallback(async (silent = false) => {
     const ws = props.wsUrl.trim();
     const tok = props.token.trim();
     const key = props.sessionKey.trim() || "agent:main";
     if (!ws || !tok) {
-      setLocalHint("WebSocket URL과 토큰을 먼저 입력하세요.");
+      if (!silent) setLocalHint("WebSocket URL과 토큰을 먼저 입력하세요.");
       return;
     }
     setBusy(true);
-    setLocalHint(null);
+    if (!silent) setLocalHint(null);
     try {
       const res = await fetch(apiPath("/api/sentinel/start"), {
         method: "POST",
@@ -77,14 +73,10 @@ export function StageSentinel(props: StageSentinelProps) {
         body: JSON.stringify({ wsUrl: ws, token: tok, sessionKey: key }),
       });
       const j = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
-      if (!res.ok) {
-        setLocalHint(j.message ?? `시작 실패 (${res.status})`);
-      } else {
-        setLocalHint("Sentinel ingest를 시작했습니다.");
-      }
+      if (!res.ok && !silent) setLocalHint(j.message ?? `시작 실패 (${res.status})`);
       await refresh();
     } catch (e) {
-      setLocalHint(e instanceof Error ? e.message : "요청 실패");
+      if (!silent) setLocalHint(e instanceof Error ? e.message : "요청 실패");
     } finally {
       setBusy(false);
     }
@@ -105,19 +97,19 @@ export function StageSentinel(props: StageSentinelProps) {
     }
   }, [refresh]);
 
-  const onClearTrace = useCallback(async () => {
-    setClearTraceBusy(true);
-    try {
-      const res = await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" });
-      const j = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
-      setLocalHint(j.ok ? "trace.jsonl 삭제 완료." : `삭제 실패: ${j.message ?? res.status}`);
-      await refresh();
-    } catch (e) {
-      setLocalHint(e instanceof Error ? e.message : "요청 실패");
-    } finally {
-      setClearTraceBusy(false);
+  // gateway 연결되면 자동 시작
+  useEffect(() => {
+    if (props.connState !== "ready") {
+      autoStartedRef.current = false;
+      return;
     }
-  }, [refresh]);
+    if (autoStartedRef.current) return;
+    if (controlMissing) return;
+    if (status === null) return; // 상태 로드 대기
+    if (status.running) { autoStartedRef.current = true; return; }
+    autoStartedRef.current = true;
+    void onStart(true);
+  }, [props.connState, status, controlMissing, onStart]);
 
   const onAbortConfirm = useCallback(async () => {
     const ws = props.wsUrl.trim();
@@ -155,26 +147,13 @@ export function StageSentinel(props: StageSentinelProps) {
     return () => window.clearTimeout(t);
   }, [localHint]);
 
-  const fmtTime = (ms: number | null | undefined) => {
-    if (ms == null) return "—";
-    try {
-      return new Date(ms).toLocaleString();
-    } catch {
-      return "—";
-    }
-  };
-
-  const fmtBytes = (n: number | null | undefined) => {
-    if (n == null) return "—";
-    if (n < 1024) return `${n} B`;
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-    return `${(n / (1024 * 1024)).toFixed(2)} MB`;
-  };
+  const fmtUptime = (ms: number | null | undefined) =>
+    ms == null ? "—" : `${Math.floor(ms / 1000)}초`;
 
   return (
     <div className="panel sentinel-panel">
       <div className="sentinel-header">
-        <h2>Sentinel 수집 (ingest)</h2>
+        <h2>Sentinel 수집</h2>
         {status?.running ? (
           <img src={publicAsset("chitoclaw1.png")} alt="sentinel active" className="sentinel-chito" />
         ) : null}
@@ -187,35 +166,15 @@ export function StageSentinel(props: StageSentinelProps) {
             <div>
               <span className="sentinel-label">프로세스</span>
               <span className={`sentinel-pill ${status?.running ? "ok" : "warn"}`}>
-                {status?.running ? `실행 중${status.pid ? ` (pid ${status.pid})` : ""}` : "중지됨"}
+                {status?.running ? "실행 중" : "중지됨"}
               </span>
+              {status?.running && status.pid ? (
+                <div className="muted" style={{ marginTop: 3, fontSize: "0.72rem" }}>pid {status.pid}</div>
+              ) : null}
             </div>
             <div>
               <span className="sentinel-label">가동 시간</span>
-              <span className="sentinel-value">
-                {status?.running && status.uptimeMs != null
-                  ? `${Math.floor(status.uptimeMs / 1000)}초`
-                  : "—"}
-              </span>
-            </div>
-            <div className="sentinel-trace-row">
-              <span className="sentinel-label">trace.jsonl</span>
-              <span className="sentinel-value">
-                {status?.trace.exists
-                  ? `${fmtBytes(status.trace.bytes)} · 갱신 ${fmtTime(status.trace.mtimeMs)}`
-                  : "파일 없음 (시작 후 생성)"}
-              </span>
-              {status?.trace.exists ? (
-                <button
-                  type="button"
-                  className="trace-clear-btn"
-                  disabled={clearTraceBusy || status?.running}
-                  title={status?.running ? "Sentinel 중지 후 삭제 가능" : "trace.jsonl 삭제"}
-                  onClick={() => void onClearTrace()}
-                >
-                  {clearTraceBusy ? "삭제 중…" : "삭제"}
-                </button>
-              ) : null}
+              <span className="sentinel-value">{fmtUptime(status?.uptimeMs)}</span>
             </div>
             {status?.lastExitCode != null && !status.running ? (
               <div className="sentinel-span-3">
@@ -234,14 +193,13 @@ export function StageSentinel(props: StageSentinelProps) {
           </div>
 
           <div className="row sentinel-actions" style={{ marginTop: 10 }}>
-            <button type="button" className="primary" disabled={busy || status?.running} onClick={onStart}>
-              Sentinel 시작
-            </button>
-            <button type="button" disabled={busy || !status?.running} onClick={onStop}>
+            {!status?.running && (
+              <button type="button" className="primary" disabled={busy} onClick={() => void onStart(false)}>
+                수동 시작
+              </button>
+            )}
+            <button type="button" disabled={busy || !status?.running} onClick={() => void onStop()}>
               Sentinel 중지
-            </button>
-            <button type="button" disabled={busy} onClick={() => void refresh()}>
-              상태 새로고침
             </button>
             <button
               type="button"
@@ -250,7 +208,7 @@ export function StageSentinel(props: StageSentinelProps) {
               onClick={() => setAbortOpen(true)}
               title="sessions.abort — 에이전트 세션을 즉시 중단합니다"
             >
-              세션 강제 중단 (abort)
+              세션 중단
             </button>
           </div>
 
@@ -287,7 +245,7 @@ export function StageSentinel(props: StageSentinelProps) {
 
           {status?.stderrTail?.trim() ? (
             <details className="sentinel-logs">
-              <summary>프로세스 로그 (끝부분)</summary>
+              <summary>프로세스 로그</summary>
               <pre className="sentinel-pre">{status.stderrTail}</pre>
             </details>
           ) : null}

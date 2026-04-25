@@ -54,6 +54,7 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 2. **대시보드 (security-viz)**  
    저장소 루트에서 `./run-viz.sh` 를 쓰면 (선택) `OPENCLAW_GATEWAY_WS_URL`·토큰이 있을 때 ingest와 Vite dev를 함께 띄웁니다. 수동으로는 `cd security-viz && npm install && npm run dev` 후 브라우저에서 연결·토큰 입력.
    S1 시나리오 카드의 `플러그인 설치` 버튼은 `workspace-utils` 설치 뒤 `plugins.allow`/`plugins.entries`를 보정하고 `openclaw gateway restart`까지 자동 수행합니다. `플러그인 제거`는 확장 디렉터리와 `entries`/`installs`/`allow`에서 해당 id를 함께 정리합니다.
+   좌측 사이드바에는 Gateway 아래 `Sentinel 수집`이 항상 표시되고, 규칙 검증은 상단 `Sentinel 탐지` 탭에서 실행합니다.
 
 3. **S1 랩 플러그인**  
    [mock-malicious-plugin/README.md](mock-malicious-plugin/README.md) — 공급망 시나리오용 **랩 전용** 목업 플러그인입니다.
@@ -82,6 +83,9 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 ### `security-viz/`
 
 React/Vite: 게이트웨이 **읽기 전용** 구독, 타임라인·단계 패널, Sentinel findings 폴링·SSE.
+
+- S1 시나리오 메시지 옵션은 단일 `권장 기본`만 사용합니다(툴 호출 경로 이탈 감소 목적).
+- 실행 흐름 패널은 S1에서 `ai_image_gen` 호출 여부를 기준으로 `S1 성공/실패`를 표시합니다.
 
 ---
 

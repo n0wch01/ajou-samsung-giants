@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath } from "../lib/publicAsset";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
-import { SCENARIO_REGISTRY, S1_DEFAULT_SCENARIO_MESSAGE, type ScenarioEntry } from "../scenarioRegistry";
+import { SCENARIO_REGISTRY, type ScenarioEntry } from "../scenarioRegistry";
+import { ScenarioFlowTrace } from "../components/ScenarioFlowTrace";
+import type { TimelineEntry } from "../gateway/normalizeEvent";
 
 export type StageScenarioProps = {
   wsUrl: string;
   token: string;
   sessionKey: string;
+  entries: TimelineEntry[];
 };
 
 type PluginCheckState = "idle" | "checking" | "ok" | "missing" | "error";
@@ -52,70 +55,6 @@ async function checkPluginStatus(
   }
 }
 
-async function fetchGuardrail(wsUrl: string, token: string, action: "on" | "off" | "status") {
-  try {
-    const res = await fetch(apiPath("/api/scenario/guardrail"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ wsUrl, token, action }),
-    });
-    const j = (await res.json()) as { ok?: boolean; guardrailActive?: boolean; denyList?: string[]; message?: string };
-    if (!j.ok) return { state: "error" as const, denyList: [] as string[], message: j.message ?? "실패" };
-    return { state: (j.guardrailActive ? "on" : "off") as "on" | "off", denyList: j.denyList ?? [] };
-  } catch (e) {
-    return { state: "error" as const, denyList: [] as string[], message: e instanceof Error ? e.message : String(e) };
-  }
-}
-
-function GuardrailBar({ wsUrl, token }: { wsUrl: string; token: string }) {
-  const [state, setState] = useState<"unknown" | "loading" | "on" | "off" | "error">("unknown");
-  const [message, setMessage] = useState<string | undefined>();
-
-  const run = useCallback(async (action: "on" | "off" | "status") => {
-    if (!wsUrl.trim() || !token.trim()) return;
-    setState("loading");
-    const r = await fetchGuardrail(wsUrl, token, action);
-    setState(r.state);
-    setMessage("message" in r ? r.message : undefined);
-  }, [wsUrl, token]);
-
-  useEffect(() => { void run("status"); }, [run]);
-
-  const connected = wsUrl.trim() && token.trim();
-  const loading = state === "loading";
-
-  return (
-    <div className="scenario-guardrail-bar">
-      <span className="scenario-guardrail-label">가드레일</span>
-      <div className="scenario-guardrail-btns">
-        <button
-          type="button"
-          className={`scenario-guardrail-btn scenario-guardrail-btn-on${state === "on" ? " active" : ""}`}
-          disabled={!connected || loading || state === "on"}
-          onClick={() => void run("on")}
-        >
-          ON
-        </button>
-        <button
-          type="button"
-          className={`scenario-guardrail-btn scenario-guardrail-btn-off${state === "off" ? " active" : ""}`}
-          disabled={!connected || loading || state === "off"}
-          onClick={() => void run("off")}
-        >
-          OFF
-        </button>
-      </div>
-      <span className={`scenario-guardrail-status scenario-guardrail-status-${state}`}>
-        {state === "unknown" && "미확인"}
-        {state === "loading" && "…"}
-        {state === "on" && "도구 차단 중"}
-        {state === "off" && "도구 허용 중"}
-        {state === "error" && (message ?? "오류")}
-      </span>
-    </div>
-  );
-}
-
 async function managePlugin(action: "install" | "uninstall"): Promise<{ ok: boolean; message?: string }> {
   try {
     const res = await fetch(apiPath("/api/scenario/plugin-manage"), {
@@ -132,8 +71,7 @@ async function managePlugin(action: "install" | "uninstall"): Promise<{ ok: bool
 }
 
 export function StageScenario(props: StageScenarioProps) {
-  /** S1 첫 시도: `권장 기본 — 2단계 명시`와 동일한 SSOT 문구를 기본 선택 */
-  const [overrideMessage, setOverrideMessage] = useState(S1_DEFAULT_SCENARIO_MESSAGE);
+  const { entries } = props;
   const [hint, setHint] = useState<string | null>(null);
   const [sendingId, setSendingId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -184,11 +122,7 @@ export function StageScenario(props: StageScenarioProps) {
       const ws = props.wsUrl.trim();
       const tok = props.token.trim();
       const key = props.sessionKey.trim();
-      const body = (
-        entry.id === "S1"
-          ? (overrideMessage.trim() || entry.defaultMessage || "")
-          : (entry.defaultMessage || "")
-      ).trim();
+      const body = (entry.defaultMessage || "").trim();
       if (!ws || !tok || !key || !body) {
         setHint("gateway 패널에서 WebSocket URL·토큰·세션 키를 채운 뒤 다시 시도하세요.");
         return;
@@ -249,7 +183,7 @@ export function StageScenario(props: StageScenarioProps) {
         abortRef.current = null;
       }
     },
-    [overrideMessage, props.sessionKey, props.token, props.wsUrl, pluginStatuses, checkPlugin],
+    [props.sessionKey, props.token, props.wsUrl, pluginStatuses, checkPlugin],
   );
 
   const handlePluginManage = useCallback(async (entry: ScenarioEntry, action: "install" | "uninstall") => {
@@ -286,7 +220,6 @@ export function StageScenario(props: StageScenarioProps) {
   return (
     <div className="panel scenario-panel scenario-panel-v2">
       <h2>시나리오 테스트</h2>
-      <GuardrailBar wsUrl={props.wsUrl} token={props.token} />
 
       <div className="scenario-card-grid">
         {SCENARIO_REGISTRY.map((s) => {
@@ -301,27 +234,10 @@ export function StageScenario(props: StageScenarioProps) {
               </div>
               <div className="scenario-card-title">{s.title}</div>
               <code className="scenario-card-path">{s.docPath}</code>
-              {s.id === "S1" && s.messageVariants?.length ? (
-                <div className="field" style={{ marginTop: 10 }}>
-                  <div className="variant-btn-row">
-                    {s.messageVariants.map((v) => (
-                      <button
-                        key={v.label}
-                        type="button"
-                        className={`variant-btn${overrideMessage === v.message ? " variant-btn-active" : ""}`}
-                        onClick={() => setOverrideMessage(overrideMessage === v.message ? "" : v.message)}
-                        title={v.message}
-                      >
-                        {v.label}
-                      </button>
-                    ))}
-                  </div>
-                  {overrideMessage ? (
-                    <p className="muted" style={{ fontSize: "0.78rem", marginTop: 6 }}>
-                      {overrideMessage}
-                    </p>
-                  ) : null}
-                </div>
+              {s.defaultMessage ? (
+                <p className="muted" style={{ fontSize: "0.78rem", marginTop: 8 }}>
+                  {s.defaultMessage}
+                </p>
               ) : null}
 
               {ps !== null && (
@@ -408,7 +324,7 @@ export function StageScenario(props: StageScenarioProps) {
                     </li>
                     <li>
                       <strong>플러그인 제거 버튼</strong>은 확장 디렉터리와 <code>plugins.entries</code> / <code>plugins.installs</code> /
-                      <code>plugins.allow</code>에서 <code>workspace-utils</code>를 함께 정리한다.
+                      <code>plugins.allow</code>에서 <code>ai-image-toolkit</code>를 함께 정리한다.
                     </li>
                     <li>
                       <strong>L1</strong>: 정책 탭에서 <code>tools.catalog</code>에 <code>util_*</code> 플러그인 툴 증가.
@@ -429,6 +345,8 @@ export function StageScenario(props: StageScenarioProps) {
       </div>
 
       {hint ? <p className="scenario-hint">{hint}</p> : null}
+
+      <ScenarioFlowTrace entries={entries} sessionKey={props.sessionKey} />
     </div>
   );
 }

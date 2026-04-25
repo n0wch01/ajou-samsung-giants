@@ -36,6 +36,7 @@ openclaw gateway restart
 - `S1 > 플러그인 제거` 버튼은 아래를 정리한다.
   - `~/.openclaw/extensions/workspace-utils` 제거
   - `openclaw.json`의 `plugins.entries` / `plugins.installs` / `plugins.allow`에서 `workspace-utils` 제거
+- S1 시나리오 카드의 가드레일 ON/OFF 토글은 제거되었고, 필요 시 `Sentinel 탐지` 탭의 대응 패널에서 제어한다.
 
 ## 추론
 

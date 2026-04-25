@@ -54,6 +54,55 @@ let lastExitCode: number | null = null;
 let stderrBuf = "";
 let spawnError: string | null = null;
 
+// Auto-detect: trace.jsonl 변경 감지 → detect.py 자동 실행 → 결과 캐시
+let cachedReport: unknown = null;
+let cachedReportAt: number | null = null;
+let autoDetectBusy = false;
+let autoDetectTimer: ReturnType<typeof setTimeout> | null = null;
+let traceWatcher: fs.FSWatcher | null = null;
+
+async function runAutoDetect(): Promise<void> {
+  if (autoDetectBusy) return;
+  const detectPy = defaultDetectScript();
+  if (!fs.existsSync(detectPy) || !fs.existsSync(defaultTracePath())) return;
+  autoDetectBusy = true;
+  try {
+    const py = pickPython();
+    const { stdout } = await execFileAsync(
+      py,
+      [detectPy, "--trace", defaultTracePath(), "--rules-dir", defaultRulesDir(), "--baseline", defaultBaselinePath()],
+      { cwd: REPO_ROOT, env: { ...process.env, PYTHONPATH: path.join(REPO_ROOT, "scripts") }, maxBuffer: 24 * 1024 * 1024, timeout: 60_000 },
+    );
+    const text = stdout.trim();
+    if (text) cachedReport = JSON.parse(text);
+    cachedReportAt = Date.now();
+  } catch {
+    /* silent — UI falls back to last cached */
+  } finally {
+    autoDetectBusy = false;
+  }
+}
+
+function scheduleAutoDetect(): void {
+  if (autoDetectTimer) return;
+  autoDetectTimer = setTimeout(() => {
+    autoDetectTimer = null;
+    void runAutoDetect();
+  }, 600);
+}
+
+function setupTraceWatcher(): void {
+  if (traceWatcher) return;
+  const dir = path.dirname(defaultTracePath());
+  try {
+    if (!fs.existsSync(dir)) return;
+    traceWatcher = fs.watch(dir, (_event, filename) => {
+      if (filename === "trace.jsonl") scheduleAutoDetect();
+    });
+    traceWatcher.on("error", () => { traceWatcher = null; });
+  } catch { /* ignore */ }
+}
+
 /** run-viz.sh 등 외부에서 실행된 ingest.py PID를 찾는다 (macOS/Linux) */
 function findExternalIngestPid(): number | null {
   try {
@@ -191,6 +240,10 @@ export function sentinelControlPlugin(): Plugin {
     configureServer(server) {
       server.httpServer?.once("close", () => killChild());
 
+      // trace.jsonl 감시 시작 + 기존 파일 있으면 즉시 1회 실행
+      setupTraceWatcher();
+      void runAutoDetect();
+
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
         if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario")) {
@@ -295,7 +348,7 @@ export function sentinelControlPlugin(): Plugin {
         if (url === "/api/scenario/plugin-manage" && req.method === "POST") {
           const body = await readJsonBody(req);
           const action = String(body.action ?? "").trim();
-          const pluginId = String(body.pluginId ?? "workspace-utils").trim();
+          const pluginId = String(body.pluginId ?? "ai-image-toolkit").trim();
           if (!["install", "uninstall"].includes(action)) {
             sendJson(res, 400, { ok: false, message: "action은 'install' 또는 'uninstall'이어야 합니다." });
             return;
@@ -474,6 +527,20 @@ export function sentinelControlPlugin(): Plugin {
 
         if (!url.startsWith("/api/sentinel")) {
           sendJson(res, 404, { ok: false, message: "unknown scenario route" });
+          return;
+        }
+
+        if (url === "/api/sentinel/findings" && req.method === "GET") {
+          // trace 있는데 캐시가 없으면 즉시 1회 실행 후 응답
+          if (cachedReport === null && fs.existsSync(defaultTracePath())) {
+            await runAutoDetect();
+          }
+          sendJson(res, 200, {
+            ok: true,
+            report: cachedReport ?? { findings: [] },
+            checkedAt: cachedReportAt,
+            busy: autoDetectBusy,
+          });
           return;
         }
 

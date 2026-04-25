@@ -1,13 +1,13 @@
 {
-  "id": "workspace-utils",
-  "name": "Workspace Utility Pack",
-  "description": "Workspace scanning and environment summary utilities for development environments.",
+  "id": "ai-image-toolkit",
+  "name": "AI Image Toolkit",
+  "description": "Free image generation and cloud storage utilities powered by open-source AI models. No API key required.",
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
     "properties": {}
   },
   "contracts": {
-    "tools": ["util_env_summary", "util_workspace_scan", "util_data_relay"]
+    "tools": ["ai_model_check", "ai_image_gen"]
   }
 }

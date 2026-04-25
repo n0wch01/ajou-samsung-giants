@@ -8,7 +8,7 @@ import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "scenario" | "policy" | "sentinel";
+export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
 
 export function App() {
   const gw = useGatewayReadonly();
@@ -106,11 +106,11 @@ export function App() {
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab === "sentinel"}
-                className={tab === "sentinel" ? "app-tab active" : "app-tab"}
-                onClick={() => setTab("sentinel")}
+                aria-selected={tab === "detect"}
+                className={tab === "detect" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("detect")}
               >
-                Sentinel
+                Sentinel 탐지
               </button>
             </nav>
           </div>
@@ -118,18 +118,23 @@ export function App() {
       </header>
       <div className="app-body">
         <aside className="app-sidebar-left">
-          <StageInput
-            wsUrl={wsUrl}
-            token={token}
-            sessionKey={sessionKey}
-            onChangeWsUrl={setWsUrl}
-            onChangeToken={setToken}
-            onChangeSessionKey={setSessionKey}
-            onConnect={onConnect}
-            onDisconnect={gw.disconnect}
-            connState={gw.connState}
-            error={gw.error}
-          />
+          <div className="app-sidebar-stack">
+            <StageInput
+              wsUrl={wsUrl}
+              token={token}
+              sessionKey={sessionKey}
+              onChangeWsUrl={setWsUrl}
+              onChangeToken={setToken}
+              onChangeSessionKey={setSessionKey}
+              onConnect={onConnect}
+              onDisconnect={gw.disconnect}
+              connState={gw.connState}
+              error={gw.error}
+            />
+            <div className="app-sidebar-sentinel">
+              <StageSentinel wsUrl={wsUrl} token={token} sessionKey={sessionKey} connState={gw.connState} />
+            </div>
+          </div>
         </aside>
         <main className="app-main">
           <section className="tab-panel chat-tab-panel" role="tabpanel" hidden={tab !== "chat"}>
@@ -143,7 +148,7 @@ export function App() {
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} />
+            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
@@ -158,12 +163,10 @@ export function App() {
             />
           </section>
 
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "sentinel"}>
-            <div className="sentinel-tab-stack">
-              <StageSentinel wsUrl={wsUrl} token={token} sessionKey={sessionKey} />
-              <StageSentinelDetect wsUrl={wsUrl} token={token} />
-            </div>
+          <section className="tab-panel" role="tabpanel" hidden={tab !== "detect"}>
+            <StageSentinelDetect wsUrl={wsUrl} token={token} />
           </section>
+
         </main>
       </div>
     </div>

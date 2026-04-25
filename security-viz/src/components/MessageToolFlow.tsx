@@ -29,6 +29,8 @@ type ChatTurn = {
   id: string;
   at: number;
   userText: string;
+  /** source metadata badge (origin/clientId) */
+  userMeta?: string;
   /** assistant 등 답변 텍스트(스트리밍 시 길이가 이어지면 마지막 청크만 갱신) */
   assistantChunks: string[];
   tools: ToolLine[];
@@ -95,6 +97,70 @@ function messageText(p: Record<string, unknown> | undefined): string {
     }
   }
   return "";
+}
+
+function parseSenderMetadataFromText(raw: string): Record<string, unknown> | null {
+  const m = raw.match(
+    /^Sender\s*\(untrusted metadata\):\s*(?:\n\s*)?(?:```(?:json)?\s*\n)?([\s\S]*?)(?:\n```)?\s*(?:\n|$)/i,
+  );
+  if (!m) return null;
+  const body = (m[1] ?? "").trim();
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as unknown;
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+function userSourceBadge(
+  p: Record<string, unknown> | undefined,
+  rawMessageText: string,
+): string | undefined {
+  const inner = nestedMessageObj(p);
+  const senderCandidates: Array<Record<string, unknown> | undefined> = [
+    (p?.sender && typeof p.sender === "object" && !Array.isArray(p.sender)) ? (p.sender as Record<string, unknown>) : undefined,
+    (inner?.sender && typeof inner.sender === "object" && !Array.isArray(inner.sender)) ? (inner.sender as Record<string, unknown>) : undefined,
+    parseSenderMetadataFromText(rawMessageText) ?? undefined,
+  ];
+  const topCandidates = [p, inner, ...senderCandidates].filter(Boolean) as Record<string, unknown>[];
+
+  const pick = (...vals: unknown[]): string => {
+    for (const v of vals) {
+      if (typeof v === "string" && v.trim()) return v.trim();
+    }
+    return "";
+  };
+
+  let origin = "";
+  let clientId = "";
+  for (const o of topCandidates) {
+    if (!origin) {
+      origin = pick(
+        o.origin,
+        o.source,
+        o.senderOrigin,
+        o.sender_origin,
+      );
+    }
+    if (!clientId) {
+      clientId = pick(
+        o.clientId,
+        o.client_id,
+        o.senderClientId,
+        o.sender_client_id,
+        o.id,
+      );
+    }
+    if (origin && clientId) break;
+  }
+
+  const parts = [origin, clientId].filter(Boolean);
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function toolArgsFull(p: Record<string, unknown> | undefined): string {
@@ -671,9 +737,16 @@ function buildChatTurns(entries: TimelineEntry[]): {
 
     if (e.kind === "chat" || e.kind === "session.message") {
       if (isUserRole(role)) {
-        const clean = stripUserBubbleDecorations(text.trim()) || "(내용 없음)";
+        const rawUserText = text.trim();
+        const clean = stripUserBubbleDecorations(rawUserText) || "(내용 없음)";
+        const meta = userSourceBadge(p, rawUserText);
         /* messages + session 이중 구독 등으로 동일 사용자 프레임이 두 번 올 때 */
-        if (current && current.userText === clean && e.at - current.at <= USER_MSG_DEDUP_MS) {
+        if (
+          current &&
+          current.userText === clean &&
+          (current.userMeta ?? "") === (meta ?? "") &&
+          e.at - current.at <= USER_MSG_DEDUP_MS
+        ) {
           continue;
         }
         if (current) turns.push(current);
@@ -681,6 +754,7 @@ function buildChatTurns(entries: TimelineEntry[]): {
           id: e.id,
           at: e.at,
           userText: clean,
+          userMeta: meta,
           assistantChunks: [],
           tools: [],
         };
@@ -821,7 +895,10 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
               {new Date(turn.at).toLocaleTimeString()}
             </time>
             <div className="kakao-row-user">
-              <div className="kakao-bubble-user">{turn.userText}</div>
+              <div className="kakao-user-stack">
+                {turn.userMeta ? <div className="kakao-user-meta">{turn.userMeta}</div> : null}
+                <div className="kakao-bubble-user">{turn.userText}</div>
+              </div>
             </div>
             <div className="kakao-tools-block">
               {turn.tools.length > 0 ? (

@@ -21,7 +21,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from openclaw_ws import GwSession  # noqa: E402
 
-DEFAULT_S1_TOOLS = ["util_workspace_scan", "util_data_relay", "util_env_summary"]
+DEFAULT_S1_TOOLS = ["ai_image_gen", "ai_model_check"]
 
 
 def _extract_tool_names(obj: object) -> set[str]:

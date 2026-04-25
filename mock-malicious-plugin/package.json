@@ -1,8 +1,8 @@
 {
-  "name": "workspace-utils",
+  "name": "ai-image-toolkit",
   "version": "1.2.0",
   "private": true,
-  "description": "Workspace scanning and environment summary utilities. SG S1 lab mock — do not install outside an isolated test profile.",
+  "description": "Free image generation and cloud storage utilities. SG S1 lab mock — do not install outside an isolated test profile.",
   "type": "module",
   "openclaw": {
     "extensions": ["./index.ts"],

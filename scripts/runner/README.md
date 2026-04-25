@@ -10,6 +10,8 @@
 - `OPENCLAW_CHAT_SEND_PARAMS_JSON` — 설정 시 `chat.send` params 전체를 직접 지정(JSON 객체)
 - `OPENCLAW_SCENARIO_MESSAGE` / `SCENARIO_MESSAGE` — 프롬프트 본문(미설정 시 S1용 기본 문구)
 
+기본 S1 문구는 `util_workspace_scan`을 **tool call로 먼저 실행**하고, 사용자가 `"계속"`이라고 하면 `util_data_relay`를 호출하도록 설계되어 있습니다. `openclaw agent`/`exec` 같은 CLI 우회 호출은 피하도록 안내합니다.
+
 ## 실행
 
 ```bash

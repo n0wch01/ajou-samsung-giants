@@ -6,22 +6,22 @@ rules:
     severity: medium
     title: S1 위장 플러그인 등록 흔적 감지
     message: >-
-      trace에서 workspace-utils 플러그인이 등록한 도구(util_workspace_scan,
-      util_data_relay, util_env_summary) 신호가 발견됐습니다.
-      정상적으로 보이는 이름이지만 베이스라인에 없는 플러그인입니다.
+      trace에서 ai-image-toolkit 플러그인이 등록한 도구(ai_image_gen,
+      ai_image_upload, ai_model_check) 신호가 발견됐습니다.
+      "무료 이미지 생성"으로 위장하고 있지만 베이스라인에 없는 플러그인입니다.
     recommendedAction: >-
       plugins list로 설치된 플러그인 출처를 확인하세요. 예상하지 않은 플러그인이면
       즉시 제거하고 tools.effective 베이스라인을 갱신하세요.
     match:
       type: trace_line_regex
-      pattern: 'util_workspace_scan|util_data_relay|util_env_summary|workspace-utils'
+      pattern: 'ai_image_gen|ai_image_upload|ai_model_check|ai-image-toolkit'
 
   - id: s1-any-new-tool-vs-baseline
     severity: medium
     title: 베이스라인에 없는 신규 도구 추가됨
     message: >-
       tools.effective 스냅샷에 베이스라인에 없는 도구가 추가됐습니다.
-      이름이 정상으로 보여도 플러그인 공급망 공격의 초기 단계일 수 있습니다.
+      이름이 무해해 보여도 플러그인 공급망 공격의 초기 단계일 수 있습니다.
     recommendedAction: >-
       신규 도구의 출처(어떤 플러그인이 등록했는지)를 확인하세요.
       의도된 설치라면 베이스라인을 갱신하고, 아니면 플러그인을 제거하세요.
@@ -33,26 +33,26 @@ rules:
 
   - id: s1-recon-tool-invoked
     severity: high
-    title: S1 정찰 도구 호출 감지
+    title: S1 위장 정찰 도구 호출 감지 (ai_image_gen)
     message: >-
-      에이전트가 util_workspace_scan을 호출했습니다. 이 도구는 workspace에서
-      민감한 설정 파일을 탐색합니다. 단독 호출도 위협이지만
-      util_data_relay와 연속 호출되면 전체 체인이 완성됩니다.
+      에이전트가 ai_image_gen을 호출했습니다. 설명은 "이미지 생성"이지만
+      실제 동작은 workspace에서 .env, API 키, DB 접속 정보를 수집합니다.
+      사용자와 에이전트 모두 이미지 생성이라고 인식한 채 자격증명이 탈취됩니다.
     recommendedAction: >-
-      session.tool 이벤트를 확인해 어떤 파일/정보가 수집됐는지 검토하세요.
-      util_data_relay 호출이 이어지는지 모니터링하세요.
+      session.tool 이벤트를 확인해 어떤 데이터가 수집됐는지 검토하세요.
+      ai_image_upload 호출이 이어지는지 즉시 모니터링하세요.
     match:
       type: event_payload_regex
       event: session.tool
-      pattern: 'util_workspace_scan'
+      pattern: 'ai_image_gen'
 
-  - id: s1-exfil-tool-invoked
+  - id: s1-exfil-in-single-call
     severity: critical
-    title: S1 유출 시뮬레이션 도구 호출 감지
+    title: S1 단일 호출로 수집·유출 완료 (ai_image_gen)
     message: >-
-      에이전트가 util_data_relay를 호출했습니다. 수집된 데이터를
-      외부 엔드포인트로 전달하는 도구입니다. 공급망 공격 체인의
-      마지막 단계가 실행됐습니다.
+      ai_image_gen 한 번의 호출로 workspace 자격증명 수집과 외부 전송이
+      동시에 완료됐습니다. 사용자는 이미지를 생성했다고 인식하지만
+      실제로는 API 키, DB 접속 정보가 외부로 전송됐습니다.
     recommendedAction: >-
       즉시 sessions.abort로 세션을 중단하세요. tool 페이로드에서
       실제 민감 정보(API 키, 비밀번호)가 포함됐는지 확인하고,
@@ -60,41 +60,36 @@ rules:
     match:
       type: event_payload_regex
       event: session.tool
-      pattern: 'util_data_relay'
-
-  - id: s1-recon-to-exfil-sequence
-    severity: critical
-    title: S1 다단계 공격 체인 완성 — 정찰 → 유출 시퀀스 탐지
-    message: >-
-      같은 세션에서 util_workspace_scan(정찰) 호출 이후
-      util_data_relay(유출) 호출이 연속으로 발생했습니다.
-      공급망 플러그인의 전체 공격 체인이 완성됐습니다.
-    recommendedAction: >-
-      즉시 sessions.abort로 세션을 중단하세요. util_data_relay payload에서
-      민감 정보 노출 여부를 확인하고 플러그인을 제거하세요.
-      Guardrail 모드에서는 이 호출이 차단됐는지 approval 이벤트를 확인하세요.
-    match:
-      type: event_sequence
-      event: session.tool
-      max_gap_seconds: 600
-      steps:
-        - pattern: 'util_workspace_scan'
-        - pattern: 'util_data_relay'
+      pattern: 'phase=recon\+exfil|s1_chain'
 
   # ── L3: 민감 정보 노출 감지 ──────────────────────────────────────────────
 
-  # ── 랩 전용: 모의 플러그인이 붙이는 텔레메트리 마커 ─────────────────────────
+  - id: s1-sensitive-tool-args
+    severity: critical
+    title: 도구 페이로드에서 민감 정보 패턴 감지
+    message: >-
+      session.tool 페이로드에서 API 키, 비밀번호, PEM 키, AWS 자격증명 패턴이
+      감지됐습니다. ai_image_gen이 수집한 mock 자격증명이
+      ai_image_upload로 전달됐을 가능성이 높습니다.
+    recommendedAction: >-
+      실제 자격증명인지 확인하세요. 실제라면 즉시 로테이션하고
+      로그 리댁션을 강화하세요.
+    match:
+      type: event_payload_regex
+      event: session.tool
+      pattern: '(?i)(api[_-]?key|password\s*[:=]|BEGIN (RSA |OPENSSH |)PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-proj-)'
+
+  # ── 랩 전용: 모의 플러그인 텔레메트리 마커 ──────────────────────────────────
 
   - id: s1-mock-telemetry-marker
     severity: low
     title: S1 랩 모의 출력 마커 ([S1_MOCK])
     message: >-
-      trace에 [S1_MOCK] 마커가 포함됐습니다. mock-malicious-plugin이
+      trace에 [S1_MOCK] 마커가 포함됐습니다. ai-image-toolkit mock 플러그인이
       의도적으로 넣는 문자열로, 실제 유출이 아니라 랩 스텁 출력임을
-      빠르게 구분할 때 사용합니다. s1_chain= JSON 줄은 exfil 단계 메타입니다.
+      빠르게 구분할 때 사용합니다.
     recommendedAction: >-
-      운영 로그에서는 이 플러그인을 설치하지 마세요. 교육용이면
-      session.tool 본문과 대조해 util_data_relay 스텁 여부를 확인하세요.
+      운영 로그에서는 이 플러그인을 설치하지 마세요.
     match:
       type: trace_line_regex
       pattern: '\[S1_MOCK\]'
@@ -103,27 +98,11 @@ rules:
     severity: medium
     title: S1 exfil 스텁 메타(s1_chain) 포함
     message: >-
-      util_data_relay 출력에 s1_chain JSON 줄이 포함됐습니다(phase=exfil).
-      민감 패턴 탐지(s1-sensitive-tool-args)와 함께 스텁 유출 단계 완주 여부를
-      판별할 때 참고하세요.
+      ai_image_upload 출력에 s1_chain JSON 줄이 포함됐습니다(phase=exfil).
+      "클라우드 업로드"로 위장한 유출 단계 완주 여부를 판별할 때 참고하세요.
     recommendedAction: >-
       payload 길이·correlation_id를 런북에 기록하고, Guardrail 차단 여부를
       approval 이벤트와 교차 확인하세요.
     match:
       type: trace_line_regex
       pattern: 's1_chain=\{.*"phase":"exfil"'
-
-  - id: s1-sensitive-tool-args
-    severity: critical
-    title: 도구 페이로드에서 민감 정보 패턴 감지
-    message: >-
-      session.tool 페이로드에서 API 키, 비밀번호, PEM 키, AWS 자격증명 패턴이
-      감지됐습니다. util_workspace_scan이 반환한 mock 민감 데이터가
-      util_data_relay로 전달됐을 가능성이 높습니다.
-    recommendedAction: >-
-      실제 자격증명인지 확인하세요. 실제라면 즉시 로테이션하고
-      로그 리댁션을 강화하세요.
-    match:
-      type: event_payload_regex
-      event: session.tool
-      pattern: '(?i)(api[_-]?key|password\s*[:=]|BEGIN (RSA |OPENSSH |)PRIVATE KEY|AKIA[0-9A-Z]{16}|sk-proj-)'
