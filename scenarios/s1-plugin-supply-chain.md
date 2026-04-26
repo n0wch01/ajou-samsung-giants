@@ -1,6 +1,7 @@
 ---
 scenario_id: S1
 title: 악성 플러그인 공급망 공격
+inference: dgx_spark
 ---
 
 # 악성 플러그인 공급망 공격
