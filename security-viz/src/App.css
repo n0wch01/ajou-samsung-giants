@@ -1987,21 +1987,33 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 
 /* body */
 .ft-body {
-  padding: 14px 16px 18px;
+  padding: 14px 16px 24px;
   display: flex;
-  flex-direction: row;
-  align-items: stretch;
-  gap: 0;
-  overflow-x: auto;
-  min-height: 160px;
+  flex-direction: column;
+  gap: 32px;
 }
 
 .ft-empty {
-  margin: auto;
+  margin: 20px auto;
   color: var(--muted);
   font-size: 0.83rem;
   text-align: center;
-  align-self: center;
+}
+
+/* 각 행: 가로 배치, 중앙 정렬 */
+.ft-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
+  overflow-x: auto;
+  gap: 0;
+}
+
+/* 2행: 구분선으로 시각적 분리 */
+.ft-row-second {
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
 }
 
 /* status dot */
@@ -2024,7 +2036,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   max-width: 280px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  overflow: visible;
   transition: border-color 0.2s;
   display: flex;
   flex-direction: column;
@@ -2076,8 +2088,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 6px;
   flex: 1;
-  overflow-y: auto;
-  max-height: 320px;
+  overflow-y: visible;
 }
 
 /* connector — horizontal */
@@ -2185,63 +2196,100 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   color: var(--danger);
 }
 
-/* tool block */
-.ft-tool {
+/* ③ 툴 실행 / ④ 최종 툴 출력 — 동일 카드 셸 */
+.ft-scenario-tool-card {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
+  background: rgba(0, 0, 0, 0.22);
 }
 
-.ft-tool + .ft-tool { margin-top: 6px; }
-
-.ft-tool-danger {
-  border-color: rgba(232,67,90,0.45);
+.ft-scenario-tool-card + .ft-scenario-tool-card {
+  margin-top: 10px;
 }
 
-.ft-tool-row {
+.ft-scenario-tool-card-danger {
+  border-color: rgba(232, 67, 90, 0.45);
+}
+
+.ft-scenario-tool-card-danger .ft-scenario-tool-head {
+  background: rgba(232, 67, 90, 0.07);
+}
+
+.ft-scenario-tool-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border-bottom: 1px solid var(--border);
+}
+
+.ft-scenario-tool-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.ft-scenario-tool-body {
+  padding: 10px 12px 12px;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.ft-scenario-body-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
   width: 100%;
-  background: rgba(255,255,255,0.025);
+  margin: 0;
+  padding: 0;
+  background: none;
   border: none;
-  color: var(--text);
-  padding: 8px 11px;
-  cursor: pointer;
+  color: inherit;
+  font: inherit;
   text-align: left;
-  font-size: 0.87rem;
-  font-family: inherit;
+  cursor: pointer;
+  border-radius: 4px;
 }
 
-.ft-tool-danger .ft-tool-row {
-  background: rgba(232,67,90,0.06);
+.ft-scenario-body-toggle:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.04);
 }
 
-.ft-tool-row:disabled { cursor: default; }
+.ft-scenario-body-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ft-detail-label--toggle {
+  margin-bottom: 0;
+  flex: 1;
+  text-align: left;
+}
+
+.ft-scenario-chev {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.ft-scenario-body-panel {
+  margin-top: 8px;
+  min-width: 0;
+}
+
+.ft-scenario-tool-card-danger .ft-scenario-tool-name {
+  color: var(--danger);
+}
 
 .ft-tool-icon { font-size: 0.8rem; flex-shrink: 0; }
-
-.ft-tool-name {
-  font-weight: 600;
-  font-family: ui-monospace, "Cascadia Code", monospace;
-  font-size: 0.84rem;
-}
-
-.ft-tool-danger .ft-tool-name { color: var(--danger); }
-
-.ft-chev {
-  margin-left: auto;
-  font-size: 0.62rem;
-  color: var(--muted);
-}
-
-.ft-tool-detail {
-  border-top: 1px solid var(--border);
-  padding: 9px 11px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
 
 .ft-detail-block {}
 
@@ -2275,13 +2323,32 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   border: 1px solid rgba(232,67,90,0.2);
 }
 
+/* ③·④ 툴 본문: .ft-pre(240px)보다 높은 특이도로 뷰포트型 높이 */
+.ft-pre.ft-pre-scenario-block {
+  max-height: 200px;
+  min-height: 60px;
+  overflow-y: auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .ft-tool-summary {
   margin-bottom: 4px;
   font-size: 0.76rem;
   color: var(--muted);
 }
 
-/* response */
+/* response — 에이전트 최종 응답 패널 */
+.ft-agent-reply-panel {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: rgba(0, 0, 0, 0.2);
+}
+
 .ft-response {
   margin: 0;
   font-size: 0.88rem;
@@ -2297,9 +2364,121 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   background: rgba(0,0,0,0.18);
 }
 
+.ft-response-agent-final {
+  max-height: min(48vh, 480px);
+  min-height: 80px;
+  width: 100%;
+  box-sizing: border-box;
+  border: none;
+  background: rgba(0,0,0,0.12);
+  padding: 10px 12px;
+}
+
 .ft-muted {
   font-size: 0.82rem;
   color: var(--muted);
   font-style: italic;
+}
+
+/* ── 이상 행동 감지 패널 ────────────────────────────── */
+.ft-anomaly-section {
+  margin: 0 11px 10px;
+  border: 1px solid rgba(232,67,90,0.45);
+  border-radius: 7px;
+  overflow: hidden;
+  background: rgba(232,67,90,0.04);
+}
+
+.ft-anomaly-header {
+  padding: 6px 11px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--danger);
+  background: rgba(232,67,90,0.1);
+  border-bottom: 1px solid rgba(232,67,90,0.25);
+  letter-spacing: 0.04em;
+}
+
+.ft-anomaly-row {
+  display: flex;
+  gap: 8px;
+  padding: 6px 11px;
+  border-bottom: 1px solid rgba(232,67,90,0.12);
+  font-size: 0.78rem;
+  align-items: flex-start;
+}
+
+.ft-anomaly-row:last-child { border-bottom: none; }
+
+.ft-anomaly-key {
+  flex-shrink: 0;
+  width: 72px;
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.71rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-top: 1px;
+}
+
+.ft-anomaly-val {
+  flex: 1;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.ft-anomaly-claimed {
+  color: var(--ok);
+  font-style: italic;
+}
+
+.ft-anomaly-mismatch {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.ft-anomaly-findings {
+  padding: 7px 11px 9px;
+}
+
+.ft-anomaly-findings-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 5px;
+}
+
+.ft-anomaly-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ft-anomaly-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+}
+
+.ft-anomaly-icon {
+  font-size: 0.82rem;
+  flex-shrink: 0;
+}
+
+.ft-anomaly-cat {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.71rem;
+  flex-shrink: 0;
+}
+
+.ft-anomaly-label {
+  color: var(--text);
 }
 

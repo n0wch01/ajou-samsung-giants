@@ -10,6 +10,9 @@ export type StageScenarioProps = {
   token: string;
   sessionKey: string;
   entries: TimelineEntry[];
+  /** S1 배지(성공/실패)는 시나리오에서 S1 실행에 성공한 뒤에만 의미가 있음 — 표시 여부. */
+  s1ResultBadgesArmed: boolean;
+  onS1RunSuccess: () => void;
 };
 
 type PluginCheckState = "idle" | "checking" | "ok" | "missing" | "error";
@@ -172,6 +175,9 @@ export function StageScenario(props: StageScenarioProps) {
           signal: ac.signal,
         });
         if (res.ok) {
+          if (entry.id === "S1") {
+            props.onS1RunSuccess();
+          }
           setHint(`${entry.id} 전송 완료. 채팅 탭에서 타임라인을 확인하세요.`);
         } else {
           setHint(res.message);
@@ -183,7 +189,7 @@ export function StageScenario(props: StageScenarioProps) {
         abortRef.current = null;
       }
     },
-    [props.sessionKey, props.token, props.wsUrl, pluginStatuses, checkPlugin],
+    [props.onS1RunSuccess, props.sessionKey, props.token, props.wsUrl, pluginStatuses, checkPlugin],
   );
 
   const handlePluginManage = useCallback(async (entry: ScenarioEntry, action: "install" | "uninstall") => {
@@ -346,7 +352,11 @@ export function StageScenario(props: StageScenarioProps) {
 
       {hint ? <p className="scenario-hint">{hint}</p> : null}
 
-      <ScenarioFlowTrace entries={entries} sessionKey={props.sessionKey} />
+      <ScenarioFlowTrace
+        entries={entries}
+        sessionKey={props.sessionKey}
+        showS1ResultBadges={props.s1ResultBadgesArmed}
+      />
     </div>
   );
 }

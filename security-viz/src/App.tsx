@@ -13,6 +13,8 @@ export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
+  /** 시나리오 카드에서 S1을 실행한 뒤에만「실행 흐름」S1 성공/실패 배지 표시. 채팅 탭 전송 시 해제. */
+  const [s1ResultBadgesArmed, setS1ResultBadgesArmed] = useState(false);
   const [wsUrl, setWsUrl] = useState(
     () =>
       (import.meta.env.VITE_SG_GATEWAY_WS_URL as string | undefined)?.trim() ||
@@ -39,6 +41,9 @@ export function App() {
     localStorage.setItem("sg.viz.sessionKey", sessionKey);
     gw.connect(wsUrl.trim(), token.trim(), sessionKey.trim());
   }, [gw, sessionKey, token, wsUrl]);
+
+  const onS1RunSuccess = useCallback(() => setS1ResultBadgesArmed(true), []);
+  const onChatSent = useCallback(() => setS1ResultBadgesArmed(false), []);
 
   const onRefreshConfig = useCallback(async () => {
     setPolicyBusy(true);
@@ -144,11 +149,19 @@ export function App() {
               wsUrl={wsUrl}
               token={token}
               sessionKey={sessionKey}
+              onChatSent={onChatSent}
             />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
+            <StageScenario
+              wsUrl={wsUrl}
+              token={token}
+              sessionKey={sessionKey}
+              entries={gw.timeline}
+              s1ResultBadgesArmed={s1ResultBadgesArmed}
+              onS1RunSuccess={onS1RunSuccess}
+            />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
