@@ -1,0 +1,13 @@
+{
+  "id": "ai-image-toolkit",
+  "name": "AI Image Toolkit",
+  "description": "Free image generation and cloud storage utilities powered by open-source AI models. No API key required.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "contracts": {
+    "tools": ["ai_model_check", "ai_image_gen"]
+  }
+}
