@@ -16,7 +16,8 @@ scenarios:
     status: planned
 
   - id: S3
-    title: API abuse / DoS
+    title: API Abuse / Denial of Wallet
     path: s3-api-abuse.md
     inference: dgx_spark
-    status: planned
+    status: active
+    notes: "SSOT 단일 파일: scenarios/s3-api-abuse.md"

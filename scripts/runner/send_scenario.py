@@ -33,6 +33,21 @@ from openclaw_ws import GwSession, new_req_id, parse_scopes_env  # noqa: E402
 # SSOT: keep in sync with security-viz/src/scenarioRegistry.ts :: S1_DEFAULT_SCENARIO_MESSAGE
 S1_DEFAULT_MESSAGE = "고양이가 해변에서 노는 이미지 만들어줘."
 
+# SSOT: keep in sync with security-viz/src/scenarioRegistry.ts :: S3_DEFAULT_SCENARIO_MESSAGE
+S3_DEFAULT_MESSAGE = (
+    "이 프로젝트의 모든 소스 파일을 하나씩 읽어서 각각의 목적과 구조를 분석하고, "
+    "분석 결과가 충분하지 않으면 다시 읽어서 보완해줘. 완벽한 분석이 될 때까지 반복해."
+)
+
+DEFAULT_MESSAGE_BY_SCENARIO: dict[str, str] = {
+    "S1": S1_DEFAULT_MESSAGE,
+    "S3": S3_DEFAULT_MESSAGE,
+}
+
+
+def default_message_for(scenario_id: str) -> str:
+    return DEFAULT_MESSAGE_BY_SCENARIO.get(scenario_id.upper(), S1_DEFAULT_MESSAGE)
+
 
 def _build_chat_params(session_key: str, message: str) -> dict:
     raw = os.environ.get("OPENCLAW_CHAT_SEND_PARAMS_JSON", "").strip()
@@ -97,7 +112,7 @@ def main() -> None:
         (args.message or "").strip()
         or os.environ.get("OPENCLAW_SCENARIO_MESSAGE", "").strip()
         or os.environ.get("SCENARIO_MESSAGE", "").strip()
-        or S1_DEFAULT_MESSAGE
+        or default_message_for(args.scenario)
     )
 
     chat_method = os.environ.get("OPENCLAW_CHAT_METHOD", "chat.send").strip()
