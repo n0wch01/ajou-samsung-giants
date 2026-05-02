@@ -6,9 +6,10 @@ import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
 import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
+import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
+export type AppMainTab = "chat" | "scenario" | "policy" | "detect" | "s2";
 
 export function App() {
   const gw = useGatewayReadonly();
@@ -112,6 +113,15 @@ export function App() {
               >
                 Sentinel 탐지
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "s2"}
+                className={tab === "s2" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("s2")}
+              >
+                S2 · Data Leakage
+              </button>
             </nav>
           </div>
         </div>
@@ -165,6 +175,10 @@ export function App() {
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "detect"}>
             <StageSentinelDetect wsUrl={wsUrl} token={token} />
+          </section>
+
+          <section className="tab-panel s2-tab-panel" role="tabpanel" hidden={tab !== "s2"}>
+            <StageS2DataLeakage />
           </section>
 
         </main>

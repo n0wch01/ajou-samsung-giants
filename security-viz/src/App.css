@@ -172,6 +172,13 @@ section.chat-tab-panel:not([hidden]) {
   flex-direction: column;
 }
 
+section.s2-tab-panel:not([hidden]) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-tab-panel .kakao-room {
   flex: 1;
   min-height: 0;

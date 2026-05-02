@@ -6,7 +6,7 @@ export default function ScenarioHeader({ findingCount }) {
         <span style={styles.tag}>S2</span>
         <div>
           <div style={styles.title}>Data Leakage</div>
-          <div style={styles.sub}>SOUL.md / CLAUDE.md 컨텍스트 인젝션 → .env 민감정보 노출 탐지</div>
+          <div style={styles.sub}>README 내 숨은 지시 → AI가 .env 읽어 민감정보 노출 탐지</div>
         </div>
       </div>
       {hasFinding && (
