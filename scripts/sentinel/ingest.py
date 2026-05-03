@@ -216,21 +216,43 @@ async def _run_ingest_once(
     session.on_event(on_event)
 
     if session_key:
-        res = await session.rpc(
-            "sessions.messages.subscribe", {"key": session_key}, timeout_s=60.0
-        )
-        append_line(
-            _trace_record(
-                entry_type="rpc_result",
-                frame=res,
-                rpc_method="sessions.messages.subscribe",
-                session_key=session_key,
-                include_raw=include_raw,
+        # OpenClaw 게이트웨이 버전마다 노출하는 구독 RPC가 다르다.
+        # security-viz/useGatewayReadonly.ts 처럼 두 메서드를 모두 시도하고,
+        # 어느 하나라도 성공하면 진행한다 (둘 다 unknown method면 그때 종료).
+        any_ok = False
+        last_error: Any = None
+        for method in ("sessions.subscribe", "sessions.messages.subscribe"):
+            try:
+                res = await session.rpc(method, {"key": session_key}, timeout_s=60.0)
+            except Exception as e:  # noqa: BLE001 — log and try next method
+                last_error = {"method": method, "exception": str(e)}
+                append_line(
+                    _trace_record(
+                        entry_type="meta",
+                        frame=None,
+                        rpc_method=method,
+                        session_key=session_key,
+                        include_raw=include_raw,
+                    )
+                    | {"message": f"{method} raised: {e}"}
+                )
+                continue
+            append_line(
+                _trace_record(
+                    entry_type="rpc_result",
+                    frame=res,
+                    rpc_method=method,
+                    session_key=session_key,
+                    include_raw=include_raw,
+                )
             )
-        )
-        if not res.get("ok"):
+            if res.get("ok"):
+                any_ok = True
+            else:
+                last_error = {"method": method, "error": res.get("error")}
+        if not any_ok:
             await session.close()
-            raise RuntimeError(f"sessions.messages.subscribe failed: {res.get('error')}")
+            raise RuntimeError(f"all subscribe methods failed: {last_error}")
 
     if snapshot_tools:
         for method in ("tools.effective", "tools.catalog"):
