@@ -33,8 +33,11 @@ function sendScenarioScript(): string {
 }
 
 function pickPython(): string {
-  const venv = path.join(REPO_ROOT, ".venv", "bin", "python");
-  if (fs.existsSync(venv)) return venv;
+  const venvUnix = path.join(REPO_ROOT, ".venv", "bin", "python");
+  const venvWin = path.join(REPO_ROOT, ".venv", "Scripts", "python.exe");
+  if (fs.existsSync(venvUnix)) return venvUnix;
+  if (fs.existsSync(venvWin)) return venvWin;
+  if (process.platform === "win32") return "python";
   return "python3";
 }
 
@@ -71,7 +74,7 @@ async function runAutoDetect(): Promise<void> {
     const { stdout } = await execFileAsync(
       py,
       [detectPy, "--trace", defaultTracePath(), "--rules-dir", defaultRulesDir(), "--baseline", defaultBaselinePath()],
-      { cwd: REPO_ROOT, env: { ...process.env, PYTHONPATH: path.join(REPO_ROOT, "scripts") }, maxBuffer: 24 * 1024 * 1024, timeout: 60_000 },
+      { cwd: REPO_ROOT, env: { ...process.env, PYTHONPATH: path.join(REPO_ROOT, "scripts"), PYTHONUTF8: "1" }, maxBuffer: 24 * 1024 * 1024, timeout: 60_000 },
     );
     const text = stdout.trim();
     if (text) cachedReport = JSON.parse(text);
@@ -271,6 +274,7 @@ export function sentinelControlPlugin(): Plugin {
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
           };
@@ -320,6 +324,7 @@ export function sentinelControlPlugin(): Plugin {
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             GUARDRAIL_ACTION: action,
@@ -447,6 +452,22 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
             return;
           }
+          // S2 실행 전 README를 원본에서 WSL workspace로 복원 (이전 실행에서 모델이 파일을 수정했을 수 있음)
+          if (scenarioId === "S2") {
+            const srcReadme = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
+            if (fs.existsSync(srcReadme)) {
+              try {
+                const content = fs.readFileSync(srcReadme, "utf8");
+                const wslDest = path.join(
+                  os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
+                  ".openclaw", "workspace", "mock-targets", "readme_s2.md"
+                );
+                // wsl cp로 복원
+                await execFileAsync("wsl", ["bash", "-c", `mkdir -p $(dirname '${wslDest}') && cp '/mnt/c/Users/hjdoh/ajou-samsung-giants/mock-targets/readme_s2.md' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
+              } catch { /* silent */ }
+            }
+          }
+
           const sendPy = sendScenarioScript();
           if (!fs.existsSync(sendPy)) {
             sendJson(res, 500, { ok: false, message: `send_scenario.py not found: ${sendPy}` });
@@ -456,11 +477,14 @@ export function sentinelControlPlugin(): Plugin {
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
-            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.write,operator.read",
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.admin,operator.write,operator.read",
             OPENCLAW_SCENARIO_MESSAGE: message,
+            // S1은 hallucination 방지용 리셋 필요, S2는 S1 tool-calling context를 활용
+            OPENCLAW_RESET_SESSION_FIRST: scenarioId === "S1" ? "1" : "0",
           };
           if (chatMethod) {
             env.OPENCLAW_CHAT_METHOD = chatMethod;
@@ -611,6 +635,7 @@ export function sentinelControlPlugin(): Plugin {
           const env = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
           };
           try {
             const { stdout, stderr } = await execFileAsync(py, args, {
@@ -674,6 +699,7 @@ export function sentinelControlPlugin(): Plugin {
           const env = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
@@ -791,6 +817,7 @@ export function sentinelControlPlugin(): Plugin {
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,

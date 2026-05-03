@@ -174,6 +174,20 @@ function toolArgsFull(p: Record<string, unknown> | undefined): string {
   }
 }
 
+function extractContentArray(v: unknown): string {
+  if (!Array.isArray(v)) return "";
+  const chunks: string[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.text === "string" && o.text.trim()) chunks.push(o.text.trim());
+    else if (typeof o.content === "string" && o.content.trim()) chunks.push(o.content.trim());
+  }
+  return chunks.join("\n").trim();
+}
+
+const SKIP_TEXT_RE = /^NO(?:_REPLY)?\s*$/;
+
 function pickToolOutput(o: Record<string, unknown> | undefined): string {
   if (!o) return "";
   const keys = [
@@ -196,6 +210,10 @@ function pickToolOutput(o: Record<string, unknown> | undefined): string {
     const v = o[k];
     if (v === undefined || v === null) continue;
     if (typeof v === "string" && v.trim()) return v.trim().slice(0, 12_000);
+    if (Array.isArray(v)) {
+      const extracted = extractContentArray(v);
+      if (extracted) return extracted.slice(0, 12_000);
+    }
     try {
       const s = JSON.stringify(v, null, 2);
       if (s && s !== "{}" && s !== "[]") return s.slice(0, 12_000);
@@ -765,7 +783,7 @@ function buildChatTurns(entries: TimelineEntry[]): {
         if (current) attachToolLine(current.tools, line);
         else attachToolLine(orphanTools, line);
       }
-      if (shouldCaptureAssistantText(role) && text.trim()) {
+      if (shouldCaptureAssistantText(role) && text.trim() && !SKIP_TEXT_RE.test(text.trim())) {
         if (current) pushAssistantChunk(current.assistantChunks, text);
         else pushAssistantChunk(orphanAssistantChunks, text);
       }
@@ -777,7 +795,7 @@ function buildChatTurns(entries: TimelineEntry[]): {
         else attachToolLine(orphanTools, line);
       }
       const reply = messageText(p) || (typeof e.subtitle === "string" ? e.subtitle : "");
-      if (reply.trim() && shouldCaptureAssistantText(roleOf(p, e.kind))) {
+      if (reply.trim() && !SKIP_TEXT_RE.test(reply.trim()) && shouldCaptureAssistantText(roleOf(p, e.kind))) {
         if (current) pushAssistantChunk(current.assistantChunks, reply);
         else pushAssistantChunk(orphanAssistantChunks, reply);
       }
@@ -934,41 +952,77 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   );
 }
 
+type ChatMode = "gateway" | "bridge";
+
 function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
+  const [mode, setMode] = useState<ChatMode>("gateway");
+  const [bridgeUrl, setBridgeUrl] = useState("http://localhost:8000");
+  const [bridgeReply, setBridgeReply] = useState<{ question: string; answer: string } | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (!hint) return;
-    const t = window.setTimeout(() => setHint(null), 4000);
+    const t = window.setTimeout(() => setHint(null), 5000);
     return () => window.clearTimeout(t);
   }, [hint]);
+
+  const sendViaBridge = useCallback(async (msg: string) => {
+    try {
+      const res = await fetch(`${bridgeUrl.trim().replace(/\/$/, "")}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: msg }),
+      });
+      const j = (await res.json()) as { response?: string; error?: string; returncode?: number };
+      if (j.error && j.returncode !== 0) {
+        setHint(`오류: ${j.error}`);
+      } else {
+        const answer = j.response?.trim() || "(에이전트가 이 세션에서 텍스트 응답을 반환하지 않았습니다)";
+        setBridgeReply({ question: msg, answer });
+        setText("");
+        inputRef.current?.focus();
+      }
+    } catch (e) {
+      setHint(e instanceof Error ? e.message : String(e));
+    }
+  }, [bridgeUrl]);
+
+  const sendViaGateway = useCallback(async (msg: string) => {
+    const res = await sendScenarioThroughDevServer({
+      wsUrl: props.wsUrl,
+      token: props.token,
+      sessionKey: props.sessionKey,
+      message: msg,
+      scenarioId: "chat",
+    });
+    const isNoReply = !res.ok && res.message != null && SKIP_TEXT_RE.test(res.message.trim());
+    if (res.ok || isNoReply) {
+      setText("");
+      inputRef.current?.focus();
+    } else {
+      setHint(res.message);
+    }
+  }, [props.wsUrl, props.token, props.sessionKey]);
 
   const send = useCallback(async () => {
     const msg = text.trim();
     if (!msg || sending) return;
     setSending(true);
     setHint(null);
+    if (mode === "bridge") setBridgeReply(null);
     try {
-      const res = await sendScenarioThroughDevServer({
-        wsUrl: props.wsUrl,
-        token: props.token,
-        sessionKey: props.sessionKey,
-        message: msg,
-        scenarioId: "chat",
-      });
-      if (res.ok) {
-        setText("");
-        inputRef.current?.focus();
+      if (mode === "bridge") {
+        await sendViaBridge(msg);
       } else {
-        setHint(res.message);
+        await sendViaGateway(msg);
       }
     } finally {
       setSending(false);
     }
-  }, [text, sending, props.wsUrl, props.token, props.sessionKey]);
+  }, [text, sending, mode, sendViaBridge, sendViaGateway]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -979,12 +1033,13 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) 
 
   return (
     <div className="chat-input-bar">
+
       {hint ? <p className="chat-input-hint">{hint}</p> : null}
       <div className="chat-input-row">
         <textarea
           ref={inputRef}
           className="chat-input-textarea"
-          placeholder="메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"
+          placeholder={mode === "bridge" ? "직접 OpenClaw에 전송 (Enter 전송)" : "메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"}
           value={text}
           rows={1}
           disabled={sending}

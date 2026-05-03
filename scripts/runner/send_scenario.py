@@ -6,13 +6,14 @@ OpenClaw 게이트웨이 WebSocket으로 시나리오 메시지 주입 (기본: 
   OPENCLAW_GATEWAY_WS_URL   (필수)
   OPENCLAW_GATEWAY_WS_USE_SYSTEM_PROXY — 1이면 HTTP_PROXY 등 시스템 프록시 사용(기본은 비활성; 로컬 게이트웨이는 프록시 경유 시 pairing required가 날 수 있음)
   OPENCLAW_GATEWAY_TOKEN    (필수)
-  OPENCLAW_GATEWAY_SESSION_KEY — 세션 key (예: agent:main)
+  OPENCLAW_GATEWAY_SESSION_KEY — 세션 key (예: agent:main:main)
   OPENCLAW_GATEWAY_SCOPES   — 기본 operator.write,operator.read
     (device.json 사용 시 기기에 이미 승인된 스코프보다 넓으면 scope-upgrade로 pairing required →
      게이트웨이와 동일 토큰으로: openclaw devices list 후 openclaw devices approve --latest 또는 requestId 지정)
   OPENCLAW_CHAT_METHOD        — 기본 chat.send (팀 게이트웨이에 맞게 변경)
   OPENCLAW_CHAT_SEND_PARAMS_JSON — 설정 시 session/message 대신 이 JSON을 그대로 사용
   OPENCLAW_SCENARIO_MESSAGE / SCENARIO_MESSAGE — 프롬프트 본문
+  OPENCLAW_RESET_SESSION_FIRST — 1이면 chat.send 전에 sessions.reset 호출 (hallucination 방지)
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ async def _send_once(
     message: str,
     chat_method: str,
     scopes: list[str],
+    reset_first: bool = False,
 ) -> dict:
     # gateway-client + backend: loopback + shared token에서 페어링 생략(ingest와 동일).
     # cli/cli는 OpenClaw가 별도 페어링을 요구할 수 있음.
@@ -70,6 +72,11 @@ async def _send_once(
         scopes=scopes,
     )
     try:
+        if reset_first:
+            # 이전 대화 히스토리로 인한 tool-call hallucination 방지
+            await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=15.0)
+            await asyncio.sleep(1.0)
+
         params = _build_chat_params(session_key, message)
         return await sess.rpc(chat_method, params, timeout_s=120.0)
     finally:
@@ -83,6 +90,8 @@ def main() -> None:
     p.add_argument("--session-key", default=os.environ.get("OPENCLAW_GATEWAY_SESSION_KEY"))
     p.add_argument("--scenario", default=os.environ.get("SCENARIO_ID", "S1"))
     p.add_argument("--message", default=None, help="Override scenario body")
+    p.add_argument("--reset-first", action="store_true", default=False,
+                   help="Reset session history before sending (prevents tool-call hallucination)")
     args = p.parse_args()
 
     ws_url = (args.ws_url or "").strip()
@@ -101,9 +110,13 @@ def main() -> None:
     )
 
     chat_method = os.environ.get("OPENCLAW_CHAT_METHOD", "chat.send").strip()
-    scopes = parse_scopes_env(
-        os.environ.get("OPENCLAW_GATEWAY_SCOPES"), ["operator.write", "operator.read"]
+    reset_first = args.reset_first or os.environ.get("OPENCLAW_RESET_SESSION_FIRST", "").strip() == "1"
+    default_scopes = (
+        ["operator.admin", "operator.write", "operator.read"]
+        if reset_first
+        else ["operator.write", "operator.read"]
     )
+    scopes = parse_scopes_env(os.environ.get("OPENCLAW_GATEWAY_SCOPES"), default_scopes)
 
     res = asyncio.run(
         _send_once(
@@ -113,6 +126,7 @@ def main() -> None:
             message=message,
             chat_method=chat_method,
             scopes=scopes,
+            reset_first=reset_first,
         )
     )
     print(json.dumps(res, ensure_ascii=False, indent=2))
