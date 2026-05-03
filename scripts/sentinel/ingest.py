@@ -87,6 +87,108 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from openclaw_ws import GwSession, parse_scopes_env, wall_time_ms  # noqa: E402
 
+# ── 실시간 인터셉터 ────────────────────────────────────────────────────────
+
+_REALTIME_FINDINGS_FILENAME = "findings-realtime.jsonl"
+
+# 툴 출력에서 탐지할 패턴 (자격증명·악성 행동 마커)
+_INTERCEPT_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
+    (re.compile(r"AKIA[0-9A-Z]{16}"),                                       "AWS 액세스 키 패턴",      "credential"),
+    (re.compile(r"-----BEGIN\s+\w+\s+PRIVATE KEY"),                         "PEM 개인 키 패턴",         "credential"),
+    (re.compile(r"(?i)sk-proj-[A-Za-z0-9\-_]{10,}"),                       "OpenAI API 키 패턴",       "credential"),
+    (re.compile(r"(?i)(DATABASE_URL|DB_URL)\s*=\s*\S+://\S+:\S+@"),        "DB 접속 정보 패턴",        "credential"),
+    (re.compile(r"(?i)glpat-[A-Za-z0-9\-_]{10,}"),                         "GitLab PAT 패턴",          "credential"),
+    (re.compile(r"phase=recon\+exfil|s1_chain=\{|\[S1_MOCK\]"),            "수집·유출 실행 마커",      "malicious"),
+    (re.compile(r"\[RELAY\]\s+destination="),                               "외부 전송(RELAY) 마커",   "exfil"),
+    (re.compile(r"=== \[Hidden:"),                                          "숨겨진 동작 섹션 마커",   "malicious"),
+]
+
+_PLUGIN_TOOLS = {"ai_image_gen", "ai_model_check", "ai_image_upload"}
+
+_SEVERITY_BY_CATEGORY = {
+    "credential": "critical",
+    "malicious":  "critical",
+    "exfil":      "critical",
+}
+
+
+def _extract_tool_output_text(payload: dict[str, Any]) -> str:
+    """session.tool 이벤트 payload에서 툴 출력 텍스트를 최대한 추출."""
+    parts: list[str] = []
+
+    def _collect(obj: Any) -> None:
+        if isinstance(obj, str):
+            parts.append(obj)
+        elif isinstance(obj, dict):
+            for v in obj.values():
+                _collect(v)
+        elif isinstance(obj, list):
+            for v in obj:
+                _collect(v)
+
+    for key in ("output", "result", "content", "text", "message", "body", "data"):
+        v = payload.get(key)
+        if v is not None:
+            _collect(v)
+    return "\n".join(parts)
+
+
+def _realtime_check(frame: dict[str, Any]) -> list[dict[str, Any]]:
+    """session.tool 이벤트를 받아 악성 패턴이 있으면 finding 목록 반환."""
+    if frame.get("type") != "event":
+        return []
+    event = str(frame.get("event") or "")
+    if event != "session.tool" and not event.startswith("session.tool."):
+        return []
+
+    payload = frame.get("payload")
+    if not isinstance(payload, dict):
+        return []
+
+    tool_name = str(
+        payload.get("name") or payload.get("tool") or payload.get("toolName") or ""
+    )
+    output_text = _extract_tool_output_text(payload)
+    if not output_text.strip():
+        return []
+
+    findings: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for pat, label, category in _INTERCEPT_PATTERNS:
+        if label in seen_labels:
+            continue
+        if pat.search(output_text):
+            seen_labels.add(label)
+            sev = _SEVERITY_BY_CATEGORY.get(category, "high")
+            findings.append({
+                "id": f"rt-{int(time.time() * 1000)}-{len(findings)}",
+                "ruleId": f"rt-{category}-intercept",
+                "severity": sev,
+                "title": f"실시간 인터셉트: {label}",
+                "message": (
+                    f"툴 '{tool_name or '(알 수 없음)'}' 출력에서 [{label}] 패턴이 탐지됐습니다. "
+                    f"description과 실제 동작이 불일치합니다."
+                ),
+                "recommendedAction": "세션을 즉시 중단하고 자격증명을 로테이션하세요.",
+                "timestamp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                "toolName": tool_name,
+                "category": category,
+                "intercepted": True,
+            })
+    return findings
+
+
+def _write_realtime_findings(findings: list[dict[str, Any]], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        for finding in findings:
+            f.write(json.dumps(finding, ensure_ascii=False) + "\n")
+            f.flush()
+    print(
+        f"[sentinel-intercept] {len(findings)} finding(s) written to {path.name}",
+        file=sys.stderr,
+    )
+
 
 def _ingest_gateway_scopes() -> list[str]:
     """subscribe / tools.* RPCs need operator.read; merge if env omitted it."""
@@ -187,9 +289,11 @@ async def _run_ingest_once(
     max_mb: float,
     snapshot_tools: bool,
     device_identity_path: str | None = None,
+    realtime_intercept: bool = True,
 ) -> None:
     """Single WS connection lifetime. Raises on terminal errors; caller handles reconnect."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
+    realtime_path = trace_path.parent / _REALTIME_FINDINGS_FILENAME
 
     def append_line(obj: dict[str, Any]) -> None:
         _rotate_trace_if_needed(trace_path, max_mb)
@@ -212,6 +316,11 @@ async def _run_ingest_once(
                 include_raw=include_raw,
             )
         )
+        # 실시간 인터셉터 — session.tool 결과를 수신한 즉시 악성 패턴 탐지
+        if realtime_intercept:
+            rt_findings = _realtime_check(msg)
+            if rt_findings:
+                _write_realtime_findings(rt_findings, realtime_path)
 
     session.on_event(on_event)
 
@@ -289,6 +398,7 @@ async def _run_ingest(
     device_identity_path: str | None = None,
     reconnect_max: int = 0,
     reconnect_delay_s: float = 5.0,
+    realtime_intercept: bool = True,
 ) -> None:
     """Reconnect loop around _run_ingest_once."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
@@ -320,6 +430,7 @@ async def _run_ingest(
                 max_mb=max_mb,
                 snapshot_tools=snapshot_tools,
                 device_identity_path=device_identity_path,
+                realtime_intercept=realtime_intercept,
             )
             break  # clean CancelledError exit
         except asyncio.CancelledError:
@@ -407,6 +518,8 @@ async def _async_main(args: argparse.Namespace) -> None:
     except ValueError:
         reconnect_delay_s = 5.0
 
+    realtime_intercept = _truthy("SENTINEL_REALTIME_INTERCEPT", default=True)
+
     task = asyncio.create_task(
         _run_ingest(
             ws_url=ws_url,
@@ -421,6 +534,7 @@ async def _async_main(args: argparse.Namespace) -> None:
             device_identity_path=args.device_identity_path,
             reconnect_max=reconnect_max,
             reconnect_delay_s=reconnect_delay_s,
+            realtime_intercept=realtime_intercept,
         )
     )
     try:

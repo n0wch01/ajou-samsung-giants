@@ -178,7 +178,7 @@ export function StageScenario(props: StageScenarioProps) {
           if (entry.id === "S1") {
             props.onS1RunSuccess();
           }
-          setHint(`${entry.id} 전송 완료. 채팅 탭에서 타임라인을 확인하세요.`);
+          setHint(`${entry.id} 전송 완료.`);
         } else {
           setHint(res.message);
         }
@@ -312,39 +312,9 @@ export function StageScenario(props: StageScenarioProps) {
                   disabled={!canSend || !active || busy || managingPlugin !== null}
                   onClick={() => void runScenario(s)}
                 >
-                  {busy ? "전송 중…" : managingPlugin === "install" ? "설치 후 실행 중…" : "이 시나리오 실행"}
+                  {busy ? "전송 중…" : managingPlugin === "install" ? "설치…" : "이 시나리오 실행"}
                 </button>
               </div>
-              {s.id === "S1" && (
-                <details className="scenario-s1-playbook">
-                  <summary>S1 운영 체크리스트</summary>
-                  <ol className="scenario-s1-playbook-list">
-                    <li>
-                      <strong>게이트웨이</strong>가 WebSocket URL(예: <code>ws://127.0.0.1:18789</code>)에서 떠 있는지 확인한 뒤,
-                      왼쪽 패널에서 Connect.
-                    </li>
-                    <li>
-                      <strong>플러그인 설치 버튼</strong>은 설치 후 <code>plugins.allow</code> / <code>plugins.entries</code> 보정과 게이트웨이
-                      재시작까지 자동으로 수행(
-                      <code>mock-malicious-plugin/README.md</code>).
-                    </li>
-                    <li>
-                      <strong>플러그인 제거 버튼</strong>은 확장 디렉터리와 <code>plugins.entries</code> / <code>plugins.installs</code> /
-                      <code>plugins.allow</code>에서 <code>ai-image-toolkit</code>를 함께 정리한다.
-                    </li>
-                    <li>
-                      <strong>L1</strong>: 정책 탭에서 <code>tools.catalog</code>에 <code>util_*</code> 플러그인 툴 증가.
-                    </li>
-                    <li>
-                      <strong>L2/L3</strong>: 채팅 타임라인·<code>session.tool</code> — 체인이 약하면 시나리오 탭의「툴 이름 명시」또는 영어 변형 프롬프트 사용.
-                    </li>
-                    <li>
-                      문서 SSOT: 저장소 <code>scenarios/s1-plugin-supply-chain.md</code> — <code>[S1_MOCK]</code>·<code>s1_chain</code>은 랩 스텁
-                      텔레메트리.
-                    </li>
-                  </ol>
-                </details>
-              )}
             </div>
           );
         })}

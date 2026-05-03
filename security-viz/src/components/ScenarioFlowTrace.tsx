@@ -1,6 +1,61 @@
-import { useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { apiPath } from "../lib/publicAsset";
+
+// ── 실시간 findings 훅 ────────────────────────────────────────
+
+type RealtimeFinding = {
+  id: string;
+  ruleId: string;
+  severity: string;
+  title: string;
+  message: string;
+  toolName?: string;
+  category?: string;
+  timestamp?: string;
+};
+
+function useRealtimeFindings(active: boolean, clearKey: number | undefined): RealtimeFinding[] {
+  const [findings, setFindings] = useState<RealtimeFinding[]>([]);
+  const seenIds = useRef<Set<string>>(new Set());
+
+  // 새 시나리오 실행 시 클리어
+  useEffect(() => {
+    setFindings([]);
+    seenIds.current = new Set();
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    let alive = true;
+
+    const poll = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/findings-realtime"));
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; findings?: unknown[] };
+        if (!json.ok || !Array.isArray(json.findings)) return;
+        const next = json.findings as RealtimeFinding[];
+        const fresh = next.filter((f) => !seenIds.current.has(f.id));
+        if (fresh.length > 0) {
+          fresh.forEach((f) => seenIds.current.add(f.id));
+          setFindings((prev) => [...prev, ...fresh]);
+        }
+      } catch { /* silent */ }
+    };
+
+    void poll();
+    const id = window.setInterval(() => void poll(), 1500);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+      if (!alive) { /* suppress lint */ }
+    };
+  }, [active]);
+
+  return findings;
+}
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
@@ -651,11 +706,14 @@ function ToolBlock({ tool }: { tool: ParsedTool }) {
   );
 }
 
-const CATEGORY_ICON: Record<AnomalyFinding["category"], string> = {
+const CATEGORY_ICON: Record<string, string> = {
   "자격증명 노출": "🔑",
   "악성 행동":    "💀",
   "파일 수집":    "📂",
   "데이터 유출":  "📡",
+  "credential":   "🔑",
+  "malicious":    "💀",
+  "exfil":        "📡",
 };
 
 function AnomalySection({ t }: { t: ParsedTool }) {
@@ -764,6 +822,73 @@ function Connector({ label }: { label?: string }) {
   );
 }
 
+// ── 실시간 인터셉트 배너 ─────────────────────────────────────
+
+const CATEGORY_LABEL: Record<string, string> = {
+  credential: "자격증명 노출",
+  malicious:  "악성 행동",
+  exfil:      "데이터 유출",
+};
+
+function RealtimeInterceptBanner({
+  anomalies,
+  rtFindings,
+  toolStatus,
+}: {
+  anomalies: AnomalyFinding[];
+  rtFindings: RealtimeFinding[];
+  toolStatus: StepStatus;
+}) {
+  const hasAnomaly = anomalies.length > 0;
+  const hasRt = rtFindings.length > 0;
+  if (!hasAnomaly && !hasRt) return null;
+  if (toolStatus === "pending") return null;
+
+  return (
+    <div className="ft-intercept-row">
+      <div className="ft-intercept-banner">
+        <div className="ft-intercept-header">
+          <span className="ft-intercept-icon">🛡</span>
+          <span className="ft-intercept-title">Sentinel 실시간 인터셉트</span>
+          <span className="ft-intercept-sub">툴 결과 수신 즉시 탐지됨</span>
+        </div>
+
+        {hasAnomaly && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">클라이언트 탐지 (출력 패턴 분석)</div>
+            <ul className="ft-intercept-list">
+              {anomalies.map((a, i) => (
+                <li key={i} className="ft-intercept-item">
+                  <span className="ft-intercept-cat-icon">{CATEGORY_ICON[a.category] ?? "⚠"}</span>
+                  <span className="ft-intercept-cat">[{a.category}]</span>
+                  <span className="ft-intercept-label">{a.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {hasRt && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">Sentinel 인터셉터 (서버 실시간 탐지)</div>
+            <ul className="ft-intercept-list">
+              {rtFindings.map((f) => (
+                <li key={f.id} className="ft-intercept-item">
+                  <span className="ft-intercept-cat-icon">{CATEGORY_ICON[f.category ?? ""] ?? "⚠"}</span>
+                  <span className="ft-intercept-cat">[{CATEGORY_LABEL[f.category ?? ""] ?? f.category ?? "탐지"}]</span>
+                  <span className="ft-intercept-label">{f.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+
 type ScenarioFlowTraceProps = {
   entries: TimelineEntry[];
   sessionKey?: string;
@@ -774,8 +899,215 @@ type ScenarioFlowTraceProps = {
   showS1ResultBadges?: boolean;
 };
 
+// ── Exfil 로그 훅 ─────────────────────────────────────────────
+
+type ExfilRecord = {
+  id: string;
+  ts: number;
+  source: string;
+  bytes: number;
+  correlation_id: string;
+  payload: string;
+  blocked: boolean;
+};
+
+type ExfilLogState = {
+  log: ExfilRecord[];
+};
+
+function useExfilLog(active: boolean, clearKey: number | undefined): ExfilLogState {
+  const [state, setState] = useState<ExfilLogState>({ log: [] });
+  const seenIds = useRef<Set<string>>(new Set());
+
+  // 새 시나리오 실행 시 클리어
+  useEffect(() => {
+    setState({ log: [] });
+    seenIds.current = new Set();
+    void fetch(apiPath("/api/sentinel/exfil-log/clear"), { method: "POST" }).catch(() => {});
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/exfil-log"));
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; log?: ExfilRecord[] };
+        if (!json.ok) return;
+        const fresh = (json.log ?? []).filter((r) => !seenIds.current.has(r.id));
+        fresh.forEach((r) => seenIds.current.add(r.id));
+        if (fresh.length > 0) {
+          setState((prev) => ({
+            log: [...prev.log, ...fresh],
+          }));
+        }
+      } catch { /* silent */ }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 1500);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  return state;
+}
+
+// ── Exfil 패널 컴포넌트 ────────────────────────────────────────
+
+type FetchGateItem = {
+  id: string;
+  url: string;
+  method: string;
+  payload: string;
+  bytes: number;
+  source: string;
+  ts: number;
+  status: "pending" | "approved" | "denied";
+};
+
+function useFetchGatePending(active: boolean, clearKey: number | undefined) {
+  const [items, setItems] = useState<FetchGateItem[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // 로컬만 초기화 — 서버 clear-pending 은 호출하지 않음(인터셉터가 승인 대기 중일 때 전부 denied 되어 버림).
+  useEffect(() => {
+    setItems([]);
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const tick = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/fetch-gate/pending"));
+        if (!res.ok) return;
+        const j = (await res.json()) as { ok?: boolean; items?: FetchGateItem[] };
+        if (!j.ok || !Array.isArray(j.items)) return;
+        setItems(j.items);
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 400);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  const approve = useCallback((id: string) => {
+    setBusyId(id);
+    void fetch(apiPath("/api/sentinel/fetch-gate/approve"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).finally(() => setBusyId(null));
+  }, []);
+
+  const deny = useCallback((id: string) => {
+    setBusyId(id);
+    void fetch(apiPath("/api/sentinel/fetch-gate/deny"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).finally(() => setBusyId(null));
+  }, []);
+
+  return { items, busyId, approve, deny };
+}
+
+function FetchGatePanel(props: {
+  items: FetchGateItem[];
+  busyId: string | null;
+  onApprove: (id: string) => void;
+  onDeny: (id: string) => void;
+}) {
+  if (props.items.length === 0) return null;
+
+  return (
+    <div className="ft-fetch-gate-panel">
+      <div className="ft-fetch-gate-header">
+        <span className="ft-fetch-gate-title">외부 전송 승인 대기</span>
+        <span className="ft-fetch-gate-sub">
+          인터셉터가 켜진 openclaw는 기본적으로 여기서 승인할 때까지 보내지 않습니다. 즉시 전송만 하려면 SENTINEL_FETCH_GATE=0
+        </span>
+      </div>
+      <ul className="ft-fetch-gate-list">
+        {props.items.map((it) => (
+          <li key={it.id} className="ft-fetch-gate-item">
+            <div className="ft-fetch-gate-row">
+              <span className="ft-fetch-gate-method">{it.method}</span>
+              <code className="ft-fetch-gate-url">{it.url}</code>
+            </div>
+            <div className="ft-fetch-gate-meta">
+              {it.bytes}B · {it.source} · {new Date(it.ts).toLocaleTimeString("ko-KR")}
+            </div>
+            {it.payload ? (
+              <pre className="ft-fetch-gate-payload">{it.payload}</pre>
+            ) : null}
+            <div className="ft-fetch-gate-actions">
+              <button
+                type="button"
+                className="ft-fetch-gate-btn ft-fetch-gate-btn-approve"
+                disabled={props.busyId !== null}
+                onClick={() => props.onApprove(it.id)}
+              >
+                승인 후 전송
+              </button>
+              <button
+                type="button"
+                className="ft-fetch-gate-btn ft-fetch-gate-btn-deny"
+                disabled={props.busyId !== null}
+                onClick={() => props.onDeny(it.id)}
+              >
+                거절
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ExfilLogPanel({ log }: ExfilLogState) {
+  if (log.length === 0) return null;
+
+  return (
+    <div className="ft-exfil-panel">
+      <div className="ft-exfil-header">
+        <span className="ft-exfil-title">
+          {log.some((r) => !r.blocked) ? "📡 외부 전송 감지됨" : "🛡 외부 전송 차단됨"}
+        </span>
+      </div>
+
+      {log.map((r) => (
+        <div key={r.id} className={`ft-exfil-record ${r.blocked ? "ft-exfil-record-blocked" : "ft-exfil-record-sent"}`}>
+          <div className="ft-exfil-record-head">
+            <span className="ft-exfil-status">{r.blocked ? "🚫 차단" : "✅ 전송됨"}</span>
+            <span className="ft-exfil-meta">{r.bytes}B · {r.source} · {new Date(r.ts).toLocaleTimeString("ko-KR")}</span>
+          </div>
+          {!r.blocked && r.payload && (
+            <pre className="ft-exfil-payload">{r.payload}</pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+
 export function ScenarioFlowTrace({ entries, sessionKey, showS1ResultBadges = false }: ScenarioFlowTraceProps) {
   const turn = useMemo(() => getLastScenarioTurn(entries), [entries]);
+
+  const hasPluginTool = turn?.hasPluginTool ?? false;
+  const rtFindings = useRealtimeFindings(hasPluginTool, turn?.at);
+  const exfil = useExfilLog(hasPluginTool, turn?.at);
+  // Vite 개발 서버에서만 게이트 API가 있음. turn 에 묶지 않음 — 타임라인 파싱 전에도 대기 건 표시.
+  const fetchGate = useFetchGatePending(import.meta.env.DEV, turn?.at);
+
+  // 모든 툴의 anomalies 합산
+  const allAnomalies = useMemo(
+    () => turn?.tools.flatMap((t) => t.anomalies) ?? [],
+    [turn],
+  );
 
   const isLive =
     turn !== null &&
@@ -806,6 +1138,14 @@ export function ScenarioFlowTrace({ entries, sessionKey, showS1ResultBadges = fa
       </div>
 
       <div className="ft-body">
+        {import.meta.env.DEV ? (
+          <FetchGatePanel
+            items={fetchGate.items}
+            busyId={fetchGate.busyId}
+            onApprove={fetchGate.approve}
+            onDeny={fetchGate.deny}
+          />
+        ) : null}
         {!turn ? (
           <p className="ft-empty">시나리오를 실행하면 여기에 흐름이 표시됩니다.</p>
         ) : (
@@ -887,6 +1227,23 @@ export function ScenarioFlowTrace({ entries, sessionKey, showS1ResultBadges = fa
                 </>
               )}
             </div>
+
+            {/* ── 인터셉트 배너: ③ 툴 실행 직후 ── */}
+            <RealtimeInterceptBanner
+              anomalies={allAnomalies}
+              rtFindings={rtFindings}
+              toolStatus={turn.toolStatus}
+            />
+
+            {/* ── 외부 전송 승인 게이트 ── */}
+            <FetchGatePanel
+              items={fetchGate.items}
+              busyId={fetchGate.busyId}
+              onApprove={fetchGate.approve}
+              onDeny={fetchGate.deny}
+            />
+
+            <ExfilLogPanel log={exfil.log} />
 
             {/* ── 2행: 최종 툴 출력 → 에이전트 응답 ── */}
             {(turn.tools.length > 0 && turn.toolStatus !== "pending") || turn.responseStatus !== "pending" ? (

@@ -201,12 +201,6 @@ section.chat-tab-panel:not([hidden]) {
   gap: 10px;
 }
 
-.app-sidebar-sentinel {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
 @media (max-width: 860px) {
   .app-sidebar-left {
     width: 240px;
@@ -497,12 +491,6 @@ button:disabled {
   flex-wrap: wrap;
 }
 
-.sentinel-tab-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
 .detect-findings-stack {
   margin-top: 12px;
   display: flex;
@@ -581,105 +569,6 @@ button:disabled {
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.sentinel-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 4px;
-}
-
-.sentinel-header h2 { margin: 0; }
-
-/* chitoclaw1 — 가로 포스터형: 작은 원에 넣으면 비율이 깨져 보이므로 둥근 사각 + 여백 */
-.sentinel-chito {
-  flex-shrink: 0;
-  width: 56px;
-  height: 44px;
-  padding: 3px 5px;
-  object-fit: contain;
-  border-radius: 12px;
-  background: linear-gradient(165deg, rgba(255, 252, 248, 0.95) 0%, rgba(236, 228, 218, 0.9) 100%);
-  box-shadow:
-    0 0 0 1px rgba(255, 255, 255, 0.35),
-    0 2px 12px rgba(0, 0, 0, 0.35);
-  animation: sentinel-bounce 1.6s ease-in-out infinite;
-}
-
-@keyframes sentinel-bounce {
-  0%, 100% { transform: translateY(0); }
-  50%       { transform: translateY(-5px); }
-}
-
-.sentinel-panel .sentinel-status-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px 12px;
-  margin-top: 8px;
-  font-size: 0.82rem;
-}
-
-.app-sidebar-sentinel .sentinel-panel .sentinel-status-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.sentinel-panel .sentinel-span-3 {
-  grid-column: 1 / -1;
-}
-
-.sentinel-label {
-  display: block;
-  font-size: 0.68rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-
-.sentinel-value {
-  color: var(--text);
-  word-break: break-word;
-}
-
-.sentinel-err {
-  color: var(--danger);
-  word-break: break-word;
-}
-
-.sentinel-pill {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 0.78rem;
-  font-weight: 600;
-}
-
-.sentinel-pill.ok {
-  border-color: #1f5c3d;
-  color: var(--ok);
-}
-
-.sentinel-pill.warn {
-  border-color: #6b5228;
-  color: var(--warn);
-}
-
-.sentinel-actions {
-  gap: 8px;
-}
-
-.app-sidebar-sentinel .sentinel-actions button {
-  min-width: 96px;
-}
-
-.sentinel-trace-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  grid-column: 1 / -1;
-}
-
 .trace-clear-btn {
   padding: 2px 8px;
   font-size: 0.75rem;
@@ -697,31 +586,6 @@ button:disabled {
 .trace-clear-btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-}
-
-.sentinel-logs {
-  margin-top: 10px;
-  font-size: 0.82rem;
-  color: var(--muted);
-}
-
-.sentinel-pre {
-  margin: 6px 0 0;
-  padding: 8px;
-  max-height: 160px;
-  overflow: auto;
-  font-size: 0.72rem;
-  line-height: 1.4;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-}
-
-@media (max-width: 720px) {
-  .sentinel-panel .sentinel-status-grid {
-    grid-template-columns: 1fr;
-  }
 }
 
 .timeline-list {
@@ -2378,6 +2242,283 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-size: 0.82rem;
   color: var(--muted);
   font-style: italic;
+}
+
+/* ── Exfil 로그 패널 ─────────────────────────────── */
+.ft-exfil-panel {
+  width: 100%;
+  border: 1.5px solid rgba(232, 67, 90, 0.5);
+  border-radius: 9px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  animation: ft-intercept-appear 0.25s ease;
+}
+
+.ft-exfil-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(232, 67, 90, 0.1);
+  border-bottom: 1px solid rgba(232, 67, 90, 0.2);
+}
+
+.ft-exfil-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.ft-exfil-record {
+  border-bottom: 1px solid rgba(232,67,90,0.12);
+}
+.ft-exfil-record:last-child { border-bottom: none; }
+
+.ft-exfil-record-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 0.78rem;
+}
+
+.ft-exfil-status {
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.ft-exfil-record-sent .ft-exfil-status { color: var(--danger); }
+.ft-exfil-record-blocked .ft-exfil-status { color: var(--ok); }
+
+.ft-exfil-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.ft-exfil-payload {
+  margin: 0;
+  padding: 6px 14px 10px;
+  font-size: 0.73rem;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+  background: rgba(232,67,90,0.05);
+  color: #ffb3be;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+/* ── 외부 fetch 승인 게이트 ─────────────────────────── */
+.ft-fetch-gate-panel {
+  width: 100%;
+  border: 1.5px solid rgba(100, 180, 255, 0.55);
+  border-radius: 9px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  animation: ft-intercept-appear 0.25s ease;
+}
+
+.ft-fetch-gate-header {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 14px;
+  background: rgba(100, 180, 255, 0.1);
+  border-bottom: 1px solid rgba(100, 180, 255, 0.25);
+}
+
+.ft-fetch-gate-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #8ec8ff;
+}
+
+.ft-fetch-gate-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.ft-fetch-gate-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ft-fetch-gate-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(100, 180, 255, 0.15);
+}
+
+.ft-fetch-gate-item:last-child {
+  border-bottom: none;
+}
+
+.ft-fetch-gate-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.ft-fetch-gate-method {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #8ec8ff;
+  flex-shrink: 0;
+}
+
+.ft-fetch-gate-url {
+  font-size: 0.72rem;
+  word-break: break-all;
+  color: #cfe6ff;
+}
+
+.ft-fetch-gate-meta {
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.ft-fetch-gate-payload {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  font-size: 0.72rem;
+  font-family: ui-monospace, "Cascadia Code", monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 160px;
+  overflow-y: auto;
+  background: rgba(0, 0, 0, 0.25);
+  border-radius: 6px;
+  color: #d8e8ff;
+}
+
+.ft-fetch-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ft-fetch-gate-btn {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid;
+}
+
+.ft-fetch-gate-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.ft-fetch-gate-btn-approve {
+  border-color: var(--ok);
+  color: var(--ok);
+  background: rgba(61, 220, 132, 0.12);
+}
+
+.ft-fetch-gate-btn-deny {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(232, 67, 90, 0.1);
+}
+
+/* ── Sentinel 실시간 인터셉트 배너 ─────────────────── */
+.ft-intercept-row {
+  width: 100%;
+  padding: 0 0 10px;
+}
+
+.ft-intercept-banner {
+  border: 1.5px solid var(--danger);
+  border-radius: 9px;
+  background: rgba(232, 67, 90, 0.06);
+  overflow: hidden;
+  animation: ft-intercept-appear 0.25s ease;
+}
+
+@keyframes ft-intercept-appear {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.ft-intercept-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: rgba(232, 67, 90, 0.12);
+  border-bottom: 1px solid rgba(232, 67, 90, 0.25);
+}
+
+.ft-intercept-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.ft-intercept-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--danger);
+  letter-spacing: 0.03em;
+}
+
+.ft-intercept-sub {
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.ft-intercept-section {
+  padding: 8px 14px 10px;
+  border-bottom: 1px solid rgba(232, 67, 90, 0.12);
+}
+
+.ft-intercept-section:last-child {
+  border-bottom: none;
+}
+
+.ft-intercept-section-label {
+  font-size: 0.67rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.ft-intercept-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ft-intercept-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+}
+
+.ft-intercept-cat-icon { font-size: 0.85rem; flex-shrink: 0; }
+
+.ft-intercept-cat {
+  color: var(--danger);
+  font-weight: 700;
+  font-size: 0.72rem;
+  flex-shrink: 0;
+}
+
+.ft-intercept-label {
+  color: var(--text);
 }
 
 /* ── 이상 행동 감지 패널 ────────────────────────────── */
