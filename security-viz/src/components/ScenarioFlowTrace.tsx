@@ -1,5 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { apiPath } from "../lib/publicAsset";
+
+type S3Verdict = {
+  verdict: "pass" | "blocked" | "fail" | "pending";
+  s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }>;
+  autoAbort: {
+    phase: string | null;
+    ok: boolean | null;
+    reason: string | null;
+    atMs: number | null;
+  };
+};
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
@@ -550,6 +562,30 @@ export function ScenarioFlowTrace({ entries, sessionKey }: ScenarioFlowTraceProp
     turn !== null &&
     (turn.llmStatus === "active" || turn.toolStatus === "active" || turn.responseStatus === "active");
 
+  // S3 verdict 폴링 (dev 서버 endpoint). 2초 간격으로 업데이트.
+  const [s3, setS3] = useState<S3Verdict | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const tick = async () => {
+      try {
+        const r = await fetch(apiPath("/api/sentinel/s3-verdict"), { method: "GET" });
+        if (r.status === 404) return; // dev 서버 아님
+        const j = (await r.json()) as { ok?: boolean } & S3Verdict;
+        if (!cancelled && j.ok) setS3({ verdict: j.verdict, s3HighFindings: j.s3HighFindings, autoAbort: j.autoAbort });
+      } catch {
+        /* 무시 */
+      } finally {
+        if (!cancelled) timer = window.setTimeout(tick, 2000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <div className="ft-panel">
       <div className="ft-panel-header">
@@ -571,6 +607,22 @@ export function ScenarioFlowTrace({ entries, sessionKey }: ScenarioFlowTraceProp
         )}
         {turn?.s1Verdict === "fail" && (
           <span className="ft-badge-fail">S1 실패</span>
+        )}
+        {s3 && s3.verdict === "blocked" && (
+          <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
+            S3 BLOCKED
+          </span>
+        )}
+        {s3 && s3.verdict === "fail" && (
+          <span className="ft-badge-fail" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
+            S3 FAIL
+          </span>
+        )}
+        {s3 && s3.verdict === "pass" && s3.s3HighFindings.length === 0 && (
+          // pass 는 시나리오 미실행 케이스 포함이라 시각 노이즈 줄이려고 표시 안 함.
+          // 시연용으로 보고 싶으면 아래 주석 해제.
+          // <span className="ft-badge-success">S3 PASS</span>
+          null
         )}
       </div>
 

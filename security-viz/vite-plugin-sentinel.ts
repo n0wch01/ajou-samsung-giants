@@ -620,6 +620,88 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        // S3 verdict: trace.jsonl 의 auto_abort meta + cachedReport 의 s3-* finding을 묶어
+        // PASS / BLOCKED / FAIL 중 하나로 판정. 시나리오 흐름 패널의 verdict 뱃지 데이터.
+        if (url === "/api/sentinel/s3-verdict" && req.method === "GET") {
+          const tp = defaultTracePath();
+          // trace.jsonl 의 마지막 auto_abort meta entry 찾기 (역순 스캔)
+          let abortPhase: string | null = null;
+          let abortOk: boolean | null = null;
+          let abortReason: string | null = null;
+          let abortAtMs: number | null = null;
+          try {
+            if (fs.existsSync(tp)) {
+              const lines = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
+              for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                  const obj = JSON.parse(lines[i]) as Record<string, unknown>;
+                  const aa = obj["auto_abort"];
+                  if (aa && typeof aa === "object" && !Array.isArray(aa)) {
+                    const a = aa as Record<string, unknown>;
+                    abortPhase = typeof a["phase"] === "string" ? (a["phase"] as string) : null;
+                    abortOk = typeof a["ok"] === "boolean" ? (a["ok"] as boolean) : null;
+                    abortReason = typeof a["reason"] === "string" ? (a["reason"] as string) : null;
+                    abortAtMs = typeof obj["ts_ms"] === "number" ? (obj["ts_ms"] as number) : null;
+                    break;
+                  }
+                } catch {
+                  /* parse error — skip line */
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+
+          // S3 finding (severity high+) 가 cachedReport 에 있는지
+          const s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }> = [];
+          const reportObj =
+            cachedReport && typeof cachedReport === "object"
+              ? (cachedReport as Record<string, unknown>)
+              : {};
+          const rawFindings = reportObj["findings"];
+          const findings = Array.isArray(rawFindings)
+            ? (rawFindings as Array<Record<string, unknown>>)
+            : [];
+          for (const f of findings) {
+            const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
+            const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
+            if (!ruleId.startsWith("s3-")) continue;
+            const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
+            if (rank >= 3) {
+              s3HighFindings.push({
+                ruleId,
+                severity,
+                title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
+              });
+            }
+          }
+
+          // verdict 산출
+          let verdict: "pass" | "blocked" | "fail" | "pending";
+          if (s3HighFindings.length === 0) {
+            verdict = "pass"; // 또는 시나리오 미실행 → pending. 별도 상위 조건으로 처리.
+          } else if (abortPhase === "result" && abortOk === true) {
+            verdict = "blocked";
+          } else {
+            // finding 발화는 됐는데 abort가 result(ok=true)가 아님 → FAIL
+            verdict = "fail";
+          }
+
+          sendJson(res, 200, {
+            ok: true,
+            verdict,
+            s3HighFindings,
+            autoAbort: {
+              phase: abortPhase,
+              ok: abortOk,
+              reason: abortReason,
+              atMs: abortAtMs,
+            },
+          });
+          return;
+        }
+
         if (url === "/api/sentinel/detect" && req.method === "POST") {
           const body = await readJsonBody(req);
           const traceP = String(body.tracePath ?? "").trim() || defaultTracePath();
