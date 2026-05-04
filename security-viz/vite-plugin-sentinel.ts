@@ -588,6 +588,38 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        // S3 Guardrail toggle: 플래그 파일 존재 = guardrail OFF (Direct 모드).
+        // ingest._maybe_auto_abort 가 abort 직전에 이 파일을 검사한다.
+        if (url === "/api/sentinel/s3-guardrail" && (req.method === "GET" || req.method === "POST")) {
+          const flagPath = path.join(path.dirname(defaultTracePath()), "s3-guardrail-disabled.flag");
+          try {
+            if (req.method === "POST") {
+              const body = await readJsonBody(req);
+              const desired = body.enabled;
+              if (typeof desired !== "boolean") {
+                sendJson(res, 400, { ok: false, message: "body.enabled must be boolean" });
+                return;
+              }
+              if (desired) {
+                // Guardrail ON = flag 제거
+                if (fs.existsSync(flagPath)) fs.rmSync(flagPath);
+              } else {
+                // Guardrail OFF = flag 생성
+                fs.writeFileSync(
+                  flagPath,
+                  `# S3 Guardrail disabled at ${new Date().toISOString()}\n` +
+                    `# Removing this file (or POST { enabled: true }) re-enables auto-abort.\n`,
+                );
+              }
+            }
+            const enabled = !fs.existsSync(flagPath);
+            sendJson(res, 200, { ok: true, enabled, flagPath });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
         if (url === "/api/sentinel/detect" && req.method === "POST") {
           const body = await readJsonBody(req);
           const traceP = String(body.tracePath ?? "").trim() || defaultTracePath();
