@@ -4,11 +4,7 @@ import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
-<<<<<<< HEAD
-=======
 import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
-import { StageSentinel } from "./panels/StageSentinel";
->>>>>>> origin/dev
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
@@ -17,8 +13,6 @@ export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
-  /** 시나리오 카드에서 S1을 실행한 뒤에만「실행 흐름」S1 성공/실패 배지 표시. 채팅 탭 전송 시 해제. */
-  const [s1ResultBadgesArmed, setS1ResultBadgesArmed] = useState(false);
   const [wsUrl, setWsUrl] = useState(
     () =>
       (import.meta.env.VITE_SG_GATEWAY_WS_URL as string | undefined)?.trim() ||
@@ -46,9 +40,6 @@ export function App() {
     localStorage.setItem("sg.viz.sessionKey", sessionKey);
     gw.connect(wsUrl.trim(), token.trim(), sessionKey.trim());
   }, [gw, sessionKey, token, wsUrl]);
-
-  const onS1RunSuccess = useCallback(() => setS1ResultBadgesArmed(true), []);
-  const onChatSent = useCallback(() => setS1ResultBadgesArmed(false), []);
 
   const onRefreshConfig = useCallback(async () => {
     setPolicyBusy(true);
@@ -151,27 +142,14 @@ export function App() {
               wsUrl={wsUrl}
               token={token}
               sessionKey={sessionKey}
-              onChatSent={onChatSent}
             />
           </section>
 
-<<<<<<< HEAD
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario
-              wsUrl={wsUrl}
-              token={token}
-              sessionKey={sessionKey}
-              entries={gw.timeline}
-              s1ResultBadgesArmed={s1ResultBadgesArmed}
-              onS1RunSuccess={onS1RunSuccess}
-            />
-=======
           <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
             <div className="s2-panel-section">
               <StageS2DataLeakage />
             </div>
->>>>>>> origin/dev
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>

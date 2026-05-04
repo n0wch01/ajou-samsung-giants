@@ -970,24 +970,14 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         wsUrl={props.wsUrl}
         token={props.token}
         sessionKey={props.sessionKey}
-        onChatSent={props.onChatSent}
       />
     </section>
   );
 }
 
-<<<<<<< HEAD
-function ChatInput(props: {
-  wsUrl: string;
-  token: string;
-  sessionKey: string;
-  onChatSent?: () => void;
-}) {
-=======
 type ChatMode = "gateway" | "bridge";
 
 function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) {
->>>>>>> origin/dev
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -1045,33 +1035,15 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) 
     setSending(true);
     setHint(null);
     try {
-<<<<<<< HEAD
-      const res = await sendScenarioThroughDevServer({
-        wsUrl: props.wsUrl,
-        token: props.token,
-        sessionKey: props.sessionKey,
-        message: msg,
-        scenarioId: "chat",
-      });
-      if (res.ok) {
-        setText("");
-        inputRef.current?.focus();
-        props.onChatSent?.();
-=======
       if (mode === "bridge") {
         await sendViaBridge(msg);
->>>>>>> origin/dev
       } else {
         await sendViaGateway(msg);
       }
     } finally {
       setSending(false);
     }
-<<<<<<< HEAD
-  }, [text, sending, props.onChatSent, props.wsUrl, props.token, props.sessionKey]);
-=======
   }, [text, sending, mode, sendViaBridge, sendViaGateway]);
->>>>>>> origin/dev
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {

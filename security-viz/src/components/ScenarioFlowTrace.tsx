@@ -1,8 +1,18 @@
-<<<<<<< HEAD
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 import { apiPath } from "../lib/publicAsset";
+
+type S3Verdict = {
+  verdict: "pass" | "blocked" | "fail" | "pending";
+  s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }>;
+  autoAbort: {
+    phase: string | null;
+    ok: boolean | null;
+    reason: string | null;
+    atMs: number | null;
+  };
+};
 
 // ── 실시간 findings 훅 ────────────────────────────────────────
 
@@ -21,7 +31,6 @@ function useRealtimeFindings(active: boolean, clearKey: number | undefined): Rea
   const [findings, setFindings] = useState<RealtimeFinding[]>([]);
   const seenIds = useRef<Set<string>>(new Set());
 
-  // 새 시나리오 실행 시 클리어
   useEffect(() => {
     setFindings([]);
     seenIds.current = new Set();
@@ -57,22 +66,6 @@ function useRealtimeFindings(active: boolean, clearKey: number | undefined): Rea
 
   return findings;
 }
-=======
-import { useEffect, useMemo, useState } from "react";
-import type { TimelineEntry } from "../gateway/normalizeEvent";
-import { apiPath } from "../lib/publicAsset";
-
-type S3Verdict = {
-  verdict: "pass" | "blocked" | "fail" | "pending";
-  s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }>;
-  autoAbort: {
-    phase: string | null;
-    ok: boolean | null;
-    reason: string | null;
-    atMs: number | null;
-  };
-};
->>>>>>> origin/dev
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
@@ -256,10 +249,7 @@ function isUser(role: string) {
   const r = role.toLowerCase();
   return r === "user" || r === "human";
 }
-<<<<<<< HEAD
-=======
 
->>>>>>> origin/dev
 function shouldCaptureResponse(role: string): boolean {
   const r = role.toLowerCase();
   if (isUser(r)) return false;
@@ -584,14 +574,11 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
         (typeof p?.invocationId === "string" && p.invocationId) ||
         (typeof d?.invocationId === "string" && d.invocationId) ||
         (typeof p?.id === "string" && p.id) ||
-<<<<<<< HEAD
         (typeof d?.id === "string" && d.id) ||
-=======
         (typeof dataObj?.toolCallId === "string" && dataObj.toolCallId) ||
         (typeof dataObj?.tool_use_id === "string" && dataObj.tool_use_id) ||
         (typeof dataObj?.callId === "string" && dataObj.callId) ||
         (typeof dataObj?.invocationId === "string" && dataObj.invocationId) ||
->>>>>>> origin/dev
         "";
       const mergeKey = callId || `${name}#${i}`;
 
@@ -945,12 +932,7 @@ function RealtimeInterceptBanner({
 type ScenarioFlowTraceProps = {
   entries: TimelineEntry[];
   sessionKey?: string;
-<<<<<<< HEAD
-  /**
-   * false이면 S1 시나리오를 카드에서 실행한 적이 없거나, 채팅 탭에서 메시지를 보내 맥락이 해제된 상태.
-   * 이 경우「S1 성공/실패」배지만 숨기고(플러그인/CRITICAL 등은 유지) 혼동을 막는다.
-   */
-  showS1ResultBadges?: boolean;
+  scenarioId?: string | null;
 };
 
 // ── Exfil 로그 훅 ─────────────────────────────────────────────
@@ -1148,13 +1130,7 @@ function ExfilLogPanel({ log }: ExfilLogState) {
 
 // ─────────────────────────────────────────────────────────────
 
-export function ScenarioFlowTrace({ entries, sessionKey, showS1ResultBadges = false }: ScenarioFlowTraceProps) {
-=======
-  scenarioId?: string | null;
-};
-
 export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioFlowTraceProps) {
->>>>>>> origin/dev
   const turn = useMemo(() => getLastScenarioTurn(entries), [entries]);
 
   const hasPluginTool = turn?.hasPluginTool ?? false;
@@ -1213,12 +1189,6 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {turn?.hasPluginTool && (
           <span className="ft-badge-critical">CRITICAL</span>
         )}
-<<<<<<< HEAD
-        {showS1ResultBadges && turn?.s1Verdict === "success" && (
-          <span className="ft-badge-success">S1 성공</span>
-        )}
-        {showS1ResultBadges && turn?.s1Verdict === "fail" && (
-=======
         {turn?.hasEnvRead && (
           <span className="ft-badge-critical">DATA LEAK</span>
         )}
@@ -1226,7 +1196,6 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
           <span className="ft-badge-success">S1 성공</span>
         )}
         {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
->>>>>>> origin/dev
           <span className="ft-badge-fail">S1 실패</span>
         )}
         {s3 && s3.verdict === "blocked" && (

@@ -2327,7 +2327,6 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-style: italic;
 }
 
-<<<<<<< HEAD
 /* ── Exfil 로그 패널 ─────────────────────────────── */
 .ft-exfil-panel {
   width: 100%;
@@ -2707,8 +2706,6 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   color: var(--text);
 }
 
-=======
-
 /* S2 Data Leakage panel — scenario tab embed */
 .scenario-tab-panel {
   display: flex;
@@ -2724,4 +2721,3 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   margin-top: 8px;
   padding-top: 4px;
 }
->>>>>>> origin/dev
