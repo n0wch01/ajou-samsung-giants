@@ -172,6 +172,13 @@ section.chat-tab-panel:not([hidden]) {
   flex-direction: column;
 }
 
+section.s2-tab-panel:not([hidden]) {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-tab-panel .kakao-room {
   flex: 1;
   min-height: 0;
@@ -934,6 +941,81 @@ button:disabled {
   padding: 0 4px;
 }
 
+.chat-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.chat-mode-btn {
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 13px;
+  border: 1px solid #1a2e4a;
+  background: #0f2040;
+  color: #7a9cc0;
+  font-size: 0.78rem;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.chat-mode-btn:hover {
+  background: #1a2e4a;
+  color: #e8edf5;
+}
+
+.chat-mode-btn-active {
+  background: #1a3a6a;
+  color: #f5c842;
+  border-color: #f5c842;
+}
+
+.chat-bridge-url {
+  flex: 1;
+  min-width: 160px;
+  height: 26px;
+  border-radius: 6px;
+  border: 1px solid #1a2e4a;
+  background: #0f2040;
+  color: #a0b8d4;
+  padding: 0 10px;
+  font-size: 0.76rem;
+}
+
+.chat-bridge-url:focus {
+  outline: none;
+  border-color: #f5c842;
+}
+
+.bridge-reply {
+  margin-bottom: 8px;
+  border-radius: 8px;
+  border: 1px solid #1a3a6a;
+  background: #0a1a30;
+  overflow: hidden;
+}
+
+.bridge-reply-q {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: #7a9cc0;
+  border-bottom: 1px solid #1a2e4a;
+  word-break: break-word;
+}
+
+.bridge-reply-a {
+  padding: 8px 10px;
+  font-size: 0.84rem;
+  color: #e8edf5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
 .kakao-room-empty {
   min-height: 220px;
   display: flex;
@@ -1117,7 +1199,8 @@ button:disabled {
 }
 
 .kakao-bubble-user {
-  max-width: min(82%, 520px);
+  max-width: min(82vw, 520px);
+  min-width: fit-content;
   padding: 10px 14px 9px;
   border-radius: 14px 14px 4px 14px;
   background: #fee500;
@@ -2303,3 +2386,19 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-style: italic;
 }
 
+
+/* S2 Data Leakage panel — scenario tab embed */
+.scenario-tab-panel {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  gap: 0;
+}
+
+.s2-panel-section {
+  flex-shrink: 0;
+  min-height: 520px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  padding-top: 4px;
+}
