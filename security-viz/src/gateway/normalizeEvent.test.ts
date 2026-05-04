@@ -3,7 +3,7 @@ import { frameToTimelineEntry } from "./normalizeEvent";
 import type { GwFrame } from "./protocol";
 
 function makeFrame(event: string, payload: unknown = {}): GwFrame {
-  return { type: "event", event, seq: 1, id: "test-id", payload };
+  return { type: "event", event, seq: 1, payload };
 }
 
 describe("frameToTimelineEntry", () => {

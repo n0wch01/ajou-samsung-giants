@@ -48,8 +48,8 @@ export function parseGwFrame(raw: string): GwFrame | null {
 }
 
 /** Matches OpenClaw `GATEWAY_CLIENT_IDS` / `GATEWAY_CLIENT_MODES` (protocol v3). */
-const CONTROL_UI_ID = "openclaw-control-ui";
-const CONTROL_UI_MODE = "ui";
+const CONTROL_UI_ID = "openclaw-tui";
+const CONTROL_UI_MODE = "cli";
 
 function guessClientPlatform(): string {
   if (typeof navigator === "undefined") return "macos";

@@ -4,6 +4,7 @@ import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
+import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
 import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
@@ -20,12 +21,13 @@ export function App() {
       "",
   );
   const [token, setToken] = useState(() => localStorage.getItem("sg.viz.token") ?? "");
-  const [sessionKey, setSessionKey] = useState(
-    () =>
-      (import.meta.env.VITE_SG_SESSION_KEY as string | undefined)?.trim() ||
-      localStorage.getItem("sg.viz.sessionKey") ||
-      "agent:main",
-  );
+  const [sessionKey, setSessionKey] = useState(() => {
+    const env = (import.meta.env.VITE_SG_SESSION_KEY as string | undefined)?.trim();
+    if (env) return env;
+    const stored = localStorage.getItem("sg.viz.sessionKey");
+    if (stored === "main" || stored === "agent:main") return "agent:main:main";
+    return stored || "agent:main:main";
+  });
 
   const [configPayload, setConfigPayload] = useState<unknown>(undefined);
   const [catalogPayload, setCatalogPayload] = useState<unknown>(undefined);
@@ -147,8 +149,11 @@ export function App() {
             />
           </section>
 
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
+          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
+            <div className="s2-panel-section">
+              <StageS2DataLeakage />
+            </div>
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
