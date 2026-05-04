@@ -5,7 +5,6 @@ import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
 import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
-import { StageSentinel } from "./panels/StageSentinel";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
@@ -133,9 +132,6 @@ export function App() {
               connState={gw.connState}
               error={gw.error}
             />
-            <div className="app-sidebar-sentinel">
-              <StageSentinel wsUrl={wsUrl} token={token} sessionKey={sessionKey} connState={gw.connState} />
-            </div>
           </div>
         </aside>
         <main className="app-main">
