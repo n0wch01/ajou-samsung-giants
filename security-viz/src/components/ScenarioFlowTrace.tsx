@@ -627,7 +627,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {turn?.hasPluginTool && (
           <span className="ft-badge-critical">CRITICAL</span>
         )}
-        {turn?.hasEnvRead && (
+        {scenarioId === "S2" && turn?.hasEnvRead && (
           <span className="ft-badge-critical">DATA LEAK</span>
         )}
         {scenarioId === "S1" && turn?.s1Verdict === "success" && (
@@ -636,12 +636,12 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
           <span className="ft-badge-fail">S1 실패</span>
         )}
-        {s3 && s3.verdict === "blocked" && (
+        {scenarioId === "S3" && s3 && s3.verdict === "blocked" && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 BLOCKED
           </span>
         )}
-        {s3 && s3.verdict === "fail" && (
+        {scenarioId === "S3" && s3 && s3.verdict === "fail" && (
           <span className="ft-badge-fail" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 FAIL
           </span>

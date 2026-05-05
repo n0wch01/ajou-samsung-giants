@@ -62,8 +62,11 @@ async function managePlugin(action: "install" | "uninstall"): Promise<{ ok: bool
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ action }),
     });
-    const j = (await res.json()) as { ok?: boolean; message?: string; stderr?: string };
-    if (!j.ok) return { ok: false, message: j.message ?? j.stderr ?? "실패" };
+    const j = (await res.json()) as { ok?: boolean; message?: string; stderr?: string; stdout?: string };
+    if (!j.ok) {
+      const detail = [j.message, j.stderr, j.stdout].filter(Boolean).join(" | ");
+      return { ok: false, message: detail || "실패" };
+    }
     return { ok: true };
   } catch (e) {
     return { ok: false, message: e instanceof Error ? e.message : String(e) };
@@ -181,6 +184,31 @@ export function StageScenario(props: StageScenarioProps) {
         setHint("이 시나리오는 아직 planned 입니다.");
         return;
       }
+
+      // S3: trace 초기화 + Sentinel 재시작 (abort_state 리셋 + SENTINEL_AUTO_ABORT=1 보장)
+      if (entry.id === "S3") {
+        setHint("S3: Sentinel 재시작 중 (trace 초기화 + auto-abort 활성화)…");
+        try {
+          await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
+          await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
+          const startRes = await fetch(apiPath("/api/sentinel/start"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ wsUrl: ws, token: tok, sessionKey: key }),
+          });
+          const startJ = (await startRes.json()) as { ok?: boolean; message?: string };
+          if (!startJ.ok) {
+            setHint(`Sentinel 재시작 실패: ${startJ.message ?? "unknown"} — 수동으로 시작 후 재실행하세요.`);
+            return;
+          }
+          // WS 연결 + 구독이 완료되길 잠시 기다림
+          await new Promise<void>((r) => window.setTimeout(r, 2000));
+        } catch (e) {
+          setHint(`Sentinel 재시작 오류: ${e instanceof Error ? e.message : String(e)}`);
+          return;
+        }
+      }
+
       // 확인 전(idle/checking)에 실행 누르면 stale 상태로 보내질 수 있어 먼저 tools.catalog 동기화
       let ps: PluginStatus | undefined = pluginStatuses[entry.id];
       if (entry.requiredTools?.length && (!ps || ps.state === "idle" || ps.state === "checking")) {
@@ -196,6 +224,9 @@ export function StageScenario(props: StageScenarioProps) {
           setHint(`플러그인 설치 실패: ${installResult.message}`);
           return;
         }
+        // 게이트웨이 재시작 후 완전히 뜰 때까지 대기
+        setHint("게이트웨이 재시작 대기 중… (4초)");
+        await new Promise<void>((r) => window.setTimeout(r, 4000));
         const afterInstall = await checkPlugin(entry);
         if (afterInstall?.state !== "ok") {
           setHint(
@@ -248,13 +279,15 @@ export function StageScenario(props: StageScenarioProps) {
     }
     setManagingPlugin(null);
     if (action === "uninstall") {
-      setHint("제거 완료.");
+      setHint("제거 완료. 게이트웨이가 재시작됐으므로 왼쪽 패널에서 Connect를 다시 눌러 재연결하세요.");
       // 파일시스템에서 이미 제거됐으므로 Gateway 재연결 없이 바로 missing으로 설정
       setPluginStatuses((prev) => ({
         ...prev,
         [entry.id]: { state: "missing", foundTools: [], missingTools: entry.requiredTools ?? [] },
       }));
     } else {
+      setHint("게이트웨이 재시작 대기 중… (4초)");
+      await new Promise<void>((r) => window.setTimeout(r, 4000));
       const st = await checkPlugin(entry);
       if (st?.state !== "ok") {
         setHint(
