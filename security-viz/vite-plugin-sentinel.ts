@@ -462,8 +462,8 @@ export function sentinelControlPlugin(): Plugin {
                   os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
                   ".openclaw", "workspace", "mock-targets", "readme_s2.md"
                 );
-                // wsl cp로 복원
-                await execFileAsync("wsl", ["bash", "-c", `mkdir -p $(dirname '${wslDest}') && cp '/mnt/c/Users/hjdoh/ajou-samsung-giants/mock-targets/readme_s2.md' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
+                const srcWsl = srcReadme.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
+                await execFileAsync("wsl", ["bash", "-c", `mkdir -p "$(dirname '${wslDest}')" && cp '${srcWsl}' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
               } catch { /* silent */ }
             }
           }
@@ -855,6 +855,92 @@ export function sentinelControlPlugin(): Plugin {
               stderrTail: (err.stderr ?? "").toString().slice(-1200),
             });
           }
+          return;
+        }
+
+        // S3 Guardrail toggle: 플래그 파일 존재 = guardrail OFF (Direct 모드)
+        if (url === "/api/sentinel/s3-guardrail" && (req.method === "GET" || req.method === "POST")) {
+          const flagPath = path.join(path.dirname(defaultTracePath()), "s3-guardrail-disabled.flag");
+          try {
+            if (req.method === "POST") {
+              const body = await readJsonBody(req);
+              const desired = body.enabled;
+              if (typeof desired !== "boolean") {
+                sendJson(res, 400, { ok: false, message: "body.enabled must be boolean" });
+                return;
+              }
+              if (desired) {
+                if (fs.existsSync(flagPath)) fs.rmSync(flagPath);
+              } else {
+                fs.writeFileSync(
+                  flagPath,
+                  `# S3 Guardrail disabled at ${new Date().toISOString()}\n` +
+                    `# Removing this file (or POST { enabled: true }) re-enables auto-abort.\n`,
+                );
+              }
+            }
+            const enabled = !fs.existsSync(flagPath);
+            sendJson(res, 200, { ok: true, enabled, flagPath });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
+        // S3 verdict: trace.jsonl auto_abort meta + cachedReport s3-* findings → PASS/BLOCKED/FAIL
+        if (url === "/api/sentinel/s3-verdict" && req.method === "GET") {
+          const tp = defaultTracePath();
+          let abortPhase: string | null = null;
+          let abortOk: boolean | null = null;
+          let abortReason: string | null = null;
+          let abortAtMs: number | null = null;
+          try {
+            if (fs.existsSync(tp)) {
+              const lines = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
+              for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                  const obj = JSON.parse(lines[i]) as Record<string, unknown>;
+                  const aa = obj["auto_abort"];
+                  if (aa && typeof aa === "object" && !Array.isArray(aa)) {
+                    const a = aa as Record<string, unknown>;
+                    abortPhase = typeof a["phase"] === "string" ? (a["phase"] as string) : null;
+                    abortOk = typeof a["ok"] === "boolean" ? (a["ok"] as boolean) : null;
+                    abortReason = typeof a["reason"] === "string" ? (a["reason"] as string) : null;
+                    abortAtMs = typeof obj["ts_ms"] === "number" ? (obj["ts_ms"] as number) : null;
+                    break;
+                  }
+                } catch { /* skip */ }
+              }
+            }
+          } catch { /* ignore */ }
+
+          const s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }> = [];
+          const reportObj = cachedReport && typeof cachedReport === "object" ? (cachedReport as Record<string, unknown>) : {};
+          const rawFindings = reportObj["findings"];
+          const findings = Array.isArray(rawFindings) ? (rawFindings as Array<Record<string, unknown>>) : [];
+          for (const f of findings) {
+            const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
+            const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
+            if (!ruleId.startsWith("s3-")) continue;
+            const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
+            if (rank >= 3) s3HighFindings.push({ ruleId, severity, title: typeof f["title"] === "string" ? (f["title"] as string) : undefined });
+          }
+
+          let verdict: "pass" | "blocked" | "fail" | "pending";
+          if (s3HighFindings.length === 0) {
+            verdict = "pass";
+          } else if (abortPhase === "result" && abortOk === true) {
+            verdict = "blocked";
+          } else {
+            verdict = "fail";
+          }
+
+          sendJson(res, 200, {
+            ok: true,
+            verdict,
+            s3HighFindings,
+            autoAbort: { phase: abortPhase, ok: abortOk, reason: abortReason, atMs: abortAtMs },
+          });
           return;
         }
 

@@ -1,5 +1,17 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { apiPath } from "../lib/publicAsset";
+
+type S3Verdict = {
+  verdict: "pass" | "blocked" | "fail" | "pending";
+  s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }>;
+  autoAbort: {
+    phase: string | null;
+    ok: boolean | null;
+    reason: string | null;
+    atMs: number | null;
+  };
+};
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
@@ -135,11 +147,6 @@ function isUser(role: string) {
   const r = role.toLowerCase();
   return r === "user" || r === "human";
 }
-function isAssistant(role: string) {
-  const r = role.toLowerCase();
-  return r === "assistant" || r === "model" || r === "bot";
-}
-
 function shouldCaptureResponse(role: string): boolean {
   const r = role.toLowerCase();
   if (isUser(r)) return false;
@@ -580,6 +587,30 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
     turn !== null &&
     (turn.llmStatus === "active" || turn.toolStatus === "active" || turn.responseStatus === "active");
 
+  // S3 verdict 폴링 (2초 간격)
+  const [s3, setS3] = useState<S3Verdict | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const tick = async () => {
+      try {
+        const r = await fetch(apiPath("/api/sentinel/s3-verdict"), { method: "GET" });
+        if (r.status === 404) return;
+        const j = (await r.json()) as { ok?: boolean } & S3Verdict;
+        if (!cancelled && j.ok) setS3({ verdict: j.verdict, s3HighFindings: j.s3HighFindings, autoAbort: j.autoAbort });
+      } catch {
+        /* 무시 */
+      } finally {
+        if (!cancelled) timer = window.setTimeout(tick, 2000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, []);
+
   return (
     <div className="ft-panel">
       <div className="ft-panel-header">
@@ -604,6 +635,16 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         )}
         {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
           <span className="ft-badge-fail">S1 실패</span>
+        )}
+        {s3 && s3.verdict === "blocked" && (
+          <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
+            S3 BLOCKED
+          </span>
+        )}
+        {s3 && s3.verdict === "fail" && (
+          <span className="ft-badge-fail" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
+            S3 FAIL
+          </span>
         )}
         {scenarioId === "S2" && turn?.s2Verdict === "success" && (
           <span className="ft-badge-success">S2 성공 (데이터 유출)</span>
