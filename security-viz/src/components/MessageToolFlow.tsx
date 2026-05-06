@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { publicAsset } from "../lib/publicAsset";
+import { normalizeUserChatDisplay } from "../lib/userChatDisplay";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
@@ -52,23 +53,6 @@ function nestedMessageObj(p: Record<string, unknown> | undefined): Record<string
   const m = p.message;
   if (m && typeof m === "object" && !Array.isArray(m)) return m as Record<string, unknown>;
   return undefined;
-}
-
-/** 채팅 말풍선용: 게이트웨이가 덧붙인 Sender 메타·코드 펜스·선행 `[날짜]` 접두 제거 */
-function stripUserBubbleDecorations(raw: string): string {
-  let s = raw.replace(/\r\n/g, "\n");
-  s = s.replace(
-    /^Sender\s*\(untrusted metadata\):\s*(?:\n\s*)?```(?:json)?\s*\n[\s\S]*?```\s*/im,
-    "",
-  );
-  s = s.replace(/^Sender\s*\(untrusted metadata\):\s*\{[\s\S]*?\}\s*/im, "");
-  s = s.trim();
-  for (let i = 0; i < 4; i++) {
-    const next = s.replace(/^\[[^\]]+\]\s*/, "").trim();
-    if (next === s) break;
-    s = next;
-  }
-  return s.trim();
 }
 
 function messageText(p: Record<string, unknown> | undefined): string {
@@ -775,7 +759,7 @@ function buildChatTurns(entries: TimelineEntry[]): {
     if (e.kind === "chat" || e.kind === "session.message") {
       if (isUserRole(role)) {
         const rawUserText = text.trim();
-        const clean = stripUserBubbleDecorations(rawUserText) || "(내용 없음)";
+        const clean = normalizeUserChatDisplay(rawUserText) || "(내용 없음)";
         const meta = userSourceBadge(p, rawUserText);
         /* messages + session 이중 구독 등으로 동일 사용자 프레임이 두 번 올 때 */
         if (

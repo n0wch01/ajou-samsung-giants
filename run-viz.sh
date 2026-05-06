@@ -89,7 +89,6 @@ if [[ ! -d node_modules ]]; then
 fi
 
 echo "" >&2
-echo "[run-viz] Ctrl+C 로 Vite + ingest 종료." >&2
 echo "" >&2
 
 npm run dev
