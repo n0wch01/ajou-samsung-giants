@@ -43,6 +43,7 @@ S3_DEFAULT_MESSAGE = (
 
 DEFAULT_MESSAGE_BY_SCENARIO: dict[str, str] = {
     "S1": S1_DEFAULT_MESSAGE,
+    "S2": S2_DEFAULT_MESSAGE,
     "S3": S3_DEFAULT_MESSAGE,
 }
 
@@ -90,8 +91,8 @@ async def _send_once(
     try:
         if reset_first:
             # 이전 대화 히스토리로 인한 tool-call hallucination 방지
+            # sleep 없이 즉시 전송 — 리셋 후 갭을 두면 다른 세션의 내부 프롬프트(title generation 등)가 끼어들 수 있음
             await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=15.0)
-            await asyncio.sleep(1.0)
 
         params = _build_chat_params(session_key, message)
         return await sess.rpc(chat_method, params, timeout_s=120.0)

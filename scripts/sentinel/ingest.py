@@ -205,6 +205,7 @@ async def _run_ingest_once(
 ) -> None:
     """Single WS connection lifetime. Raises on terminal errors; caller handles reconnect."""
     trace_path.parent.mkdir(parents=True, exist_ok=True)
+    realtime_path = trace_path.parent / _REALTIME_FINDINGS_FILENAME
 
     def append_line(obj: dict[str, Any]) -> None:
         _rotate_trace_if_needed(trace_path, max_mb)
