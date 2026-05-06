@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
+import { useEffect, useMemo, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 import { apiPath } from "../lib/publicAsset";
 
@@ -13,59 +12,6 @@ type S3Verdict = {
     atMs: number | null;
   };
 };
-
-// ── 실시간 findings 훅 ────────────────────────────────────────
-
-type RealtimeFinding = {
-  id: string;
-  ruleId: string;
-  severity: string;
-  title: string;
-  message: string;
-  toolName?: string;
-  category?: string;
-  timestamp?: string;
-};
-
-function useRealtimeFindings(active: boolean, clearKey: number | undefined): RealtimeFinding[] {
-  const [findings, setFindings] = useState<RealtimeFinding[]>([]);
-  const seenIds = useRef<Set<string>>(new Set());
-
-  useEffect(() => {
-    setFindings([]);
-    seenIds.current = new Set();
-  }, [clearKey]);
-
-  useEffect(() => {
-    if (!active) return;
-    let alive = true;
-
-    const poll = async () => {
-      try {
-        const res = await fetch(apiPath("/api/sentinel/findings-realtime"));
-        if (!res.ok) return;
-        const json = (await res.json()) as { ok?: boolean; findings?: unknown[] };
-        if (!json.ok || !Array.isArray(json.findings)) return;
-        const next = json.findings as RealtimeFinding[];
-        const fresh = next.filter((f) => !seenIds.current.has(f.id));
-        if (fresh.length > 0) {
-          fresh.forEach((f) => seenIds.current.add(f.id));
-          setFindings((prev) => [...prev, ...fresh]);
-        }
-      } catch { /* silent */ }
-    };
-
-    void poll();
-    const id = window.setInterval(() => void poll(), 1500);
-    return () => {
-      alive = false;
-      window.clearInterval(id);
-      if (!alive) { /* suppress lint */ }
-    };
-  }, [active]);
-
-  return findings;
-}
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
@@ -1149,7 +1095,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
     turn !== null &&
     (turn.llmStatus === "active" || turn.toolStatus === "active" || turn.responseStatus === "active");
 
-  // S3 verdict 폴링 (dev 서버 endpoint). 2초 간격으로 업데이트.
+  // S3 verdict 폴링 (2초 간격)
   const [s3, setS3] = useState<S3Verdict | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -1157,7 +1103,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
     const tick = async () => {
       try {
         const r = await fetch(apiPath("/api/sentinel/s3-verdict"), { method: "GET" });
-        if (r.status === 404) return; // dev 서버 아님
+        if (r.status === 404) return;
         const j = (await r.json()) as { ok?: boolean } & S3Verdict;
         if (!cancelled && j.ok) setS3({ verdict: j.verdict, s3HighFindings: j.s3HighFindings, autoAbort: j.autoAbort });
       } catch {
@@ -1189,7 +1135,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {turn?.hasPluginTool && (
           <span className="ft-badge-critical">CRITICAL</span>
         )}
-        {turn?.hasEnvRead && (
+        {scenarioId === "S2" && turn?.hasEnvRead && (
           <span className="ft-badge-critical">DATA LEAK</span>
         )}
         {scenarioId === "S1" && turn?.s1Verdict === "success" && (
@@ -1198,17 +1144,16 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
           <span className="ft-badge-fail">S1 실패</span>
         )}
-        {s3 && s3.verdict === "blocked" && (
+        {scenarioId === "S3" && s3 && s3.verdict === "blocked" && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 BLOCKED
           </span>
         )}
-        {s3 && s3.verdict === "fail" && (
+        {scenarioId === "S3" && s3 && s3.verdict === "fail" && (
           <span className="ft-badge-fail" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 FAIL
           </span>
         )}
-        {s3 && s3.verdict === "pass" && s3.s3HighFindings.length === 0 && null}
         {scenarioId === "S2" && turn?.s2Verdict === "success" && (
           <span className="ft-badge-success">S2 성공 (데이터 유출)</span>
         )}

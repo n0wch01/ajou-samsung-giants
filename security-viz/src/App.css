@@ -1983,7 +1983,8 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   max-width: 280px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: visible;
+  overflow-y: auto;
+  max-height: 480px;
   transition: border-color 0.2s;
   display: flex;
   flex-direction: column;
@@ -2035,7 +2036,6 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   flex-direction: column;
   gap: 6px;
   flex: 1;
-  overflow-y: visible;
 }
 
 /* connector — horizontal */
@@ -2259,8 +2259,6 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   background: rgba(0,0,0,0.28);
   border-radius: 5px;
   padding: 7px 10px;
-  max-height: 240px;
-  overflow-y: auto;
   line-height: 1.5;
 }
 
