@@ -3,6 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { publicAsset } from "../lib/publicAsset";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
+import { type GwFrame } from "../gateway/protocol";
+import { apiPath } from "../lib/publicAsset";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 
@@ -12,6 +14,10 @@ type MessageToolFlowProps = {
   wsUrl: string;
   token: string;
   sessionKey: string;
+  /** Python dev server 스트리밍으로 받은 GwFrame을 타임라인에 주입한다. */
+  injectFrame?: (frame: GwFrame) => void;
+  /** 채팅 탭에서 전송이 성공했을 때(시나리오 S1 전용 배지 맥락 해제 등) */
+  onChatSent?: () => void;
 };
 
 type ToolLine = {
@@ -947,14 +953,19 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         ))}
         <div ref={bottomRef} />
       </div>
-      <ChatInput wsUrl={props.wsUrl} token={props.token} sessionKey={props.sessionKey} />
+      <ChatInput
+        wsUrl={props.wsUrl}
+        token={props.token}
+        sessionKey={props.sessionKey}
+        injectFrame={props.injectFrame}
+      />
     </section>
   );
 }
 
 type ChatMode = "gateway" | "bridge";
 
-function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) {
+function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; injectFrame?: (frame: GwFrame) => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
@@ -991,6 +1002,49 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) 
   }, [bridgeUrl]);
 
   const sendViaGateway = useCallback(async (msg: string) => {
+    if (props.injectFrame) {
+      // Dev server가 Python(device 서명)으로 구독+전송 후 이벤트를 스트리밍해줌
+      setText("");
+      inputRef.current?.focus();
+      try {
+        const res = await fetch(apiPath("/api/scenario/chat-stream"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wsUrl: props.wsUrl,
+            token: props.token,
+            sessionKey: props.sessionKey,
+            message: msg,
+          }),
+        });
+        if (!res.ok || !res.body) {
+          const j = await res.json().catch(() => ({})) as { message?: string };
+          setHint(j.message ?? `HTTP ${res.status}`);
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split("\n");
+          buf = lines.pop() ?? "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const frame = JSON.parse(trimmed) as { type?: string; event?: string };
+              if (frame.type === "event") props.injectFrame!(frame as import("../gateway/protocol").GwFrame);
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      } catch (e) {
+        setHint(e instanceof Error ? e.message : String(e));
+      }
+      return;
+    }
     const res = await sendScenarioThroughDevServer({
       wsUrl: props.wsUrl,
       token: props.token,
@@ -1005,7 +1059,7 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string }) 
     } else {
       setHint(res.message);
     }
-  }, [props.wsUrl, props.token, props.sessionKey]);
+  }, [props.wsUrl, props.token, props.sessionKey, props.injectFrame]);
 
   const send = useCallback(async () => {
     const msg = text.trim();

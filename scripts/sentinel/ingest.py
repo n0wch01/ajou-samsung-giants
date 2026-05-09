@@ -94,6 +94,7 @@ from openclaw_ws import GwSession, parse_scopes_env, wall_time_ms  # noqa: E402
 from sentinel.detect import RealTimeRateDetector, _load_yaml_rules  # noqa: E402
 
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_REALTIME_FINDINGS_FILENAME = "findings-realtime.jsonl"
 
 
 def _default_rules_dir_path() -> Path:

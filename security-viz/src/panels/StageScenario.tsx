@@ -4,12 +4,15 @@ import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import { SCENARIO_REGISTRY, type ScenarioEntry } from "../scenarioRegistry";
 import { ScenarioFlowTrace } from "../components/ScenarioFlowTrace";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import type { GwFrame } from "../gateway/protocol";
 
 export type StageScenarioProps = {
   wsUrl: string;
   token: string;
   sessionKey: string;
   entries: TimelineEntry[];
+  onS1RunSuccess?: () => void;
+  injectFrame?: (frame: GwFrame) => void;
 };
 
 type PluginCheckState = "idle" | "checking" | "ok" | "missing" | "error";
@@ -264,9 +267,97 @@ export function StageScenario(props: StageScenarioProps) {
         setSendingId(null);
         abortRef.current = null;
       }
-    },
-    [props.sessionKey, props.token, props.wsUrl, pluginStatuses, checkPlugin],
-  );
+    }
+
+    let ps: PluginStatus | undefined = pluginStatuses[entry.id];
+    if (entry.requiredTools?.length && (!ps || ps.state === "idle" || ps.state === "checking")) {
+      ps = await checkPlugin(entry);
+    }
+    if (entry.requiredTools?.length && ps?.state === "missing") {
+      showHint("플러그인 자동 설치 중…", "info");
+      setManagingPlugin("install");
+      const installResult = await managePlugin("install");
+      setManagingPlugin(null);
+      if (!installResult.ok) {
+        showHint(`플러그인 설치 실패: ${installResult.message}`, "err");
+        return;
+      }
+      showHint("게이트웨이 재시작 대기 중… (4초)", "info");
+      await new Promise<void>((r) => window.setTimeout(r, 4000));
+      const afterInstall = await checkPlugin(entry);
+      if (afterInstall?.state !== "ok") {
+        showHint("설치 완료 후 tools.catalog에 도구가 아직 없습니다. 게이트웨이 연결 상태를 확인 후 재확인하세요.", "err");
+        return;
+      }
+      showHint("플러그인 반영 확인됨. 시나리오 실행 중…", "ok");
+    }
+
+    abortRef.current?.abort();
+    const ac = new AbortController();
+    abortRef.current = ac;
+    setSendingId(entry.id);
+    setLastRunScenarioId(entry.id);
+    showHint(`${entry.id} 전송 중…`, "info");
+    try {
+      if (props.injectFrame) {
+        const res = await fetch(apiPath("/api/scenario/chat-stream"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: ac.signal,
+          body: JSON.stringify({
+            wsUrl: ws, token: tok, sessionKey: key,
+            message: body,
+            scenarioId: entry.id,
+            resetSession: true,
+          }),
+        });
+        if (!res.ok || !res.body) {
+          const j = await res.json().catch(() => ({})) as { message?: string };
+          showHint(j.message ?? `HTTP ${res.status}`, "err");
+        } else {
+          if (entry.id === "S1") props.onS1RunSuccess?.();
+          showHint(`${entry.id} 전송 완료.`, "ok");
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = "";
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split("\n");
+            buf = lines.pop() ?? "";
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              try {
+                const frame = JSON.parse(trimmed) as { type?: string };
+                if (frame.type === "event") props.injectFrame!(frame as GwFrame);
+                else if (frame.type === "error") showHint((frame as { message?: string }).message ?? "스트리밍 오류", "err");
+              } catch { /* skip malformed line */ }
+            }
+          }
+        }
+      } else {
+        const res = await sendScenarioThroughDevServer({
+          wsUrl: ws, token: tok, sessionKey: key,
+          message: body, scenarioId: entry.id, signal: ac.signal,
+        });
+        if (res.ok) {
+          if (entry.id === "S1") props.onS1RunSuccess?.();
+          showHint(`${entry.id} 전송 완료.`, "ok");
+        } else {
+          showHint(res.message ?? "전송 실패", "err");
+        }
+      }
+    } catch (e) {
+      if ((e as DOMException)?.name !== "AbortError") {
+        showHint(e instanceof Error ? e.message : String(e), "err");
+      }
+    } finally {
+      setSendingId(null);
+      abortRef.current = null;
+    }
+  }, [props, pluginStatuses, checkPlugin, showHint]);
 
   const handlePluginManage = useCallback(async (entry: ScenarioEntry, action: "install" | "uninstall") => {
     setManagingPlugin(action);
@@ -390,7 +481,7 @@ export function StageScenario(props: StageScenarioProps) {
                   disabled={!canSend || !active || busy || managingPlugin !== null}
                   onClick={() => void runScenario(s)}
                 >
-                  {busy ? "전송 중…" : managingPlugin === "install" ? "설치 후 실행 중…" : "이 시나리오 실행"}
+                  {busy ? "실행 중…" : (ps !== null && managingPlugin === "install") ? "플러그인 설치 중…" : "시나리오 실행"}
                 </button>
               </div>
               {s.id === "S2" && (
