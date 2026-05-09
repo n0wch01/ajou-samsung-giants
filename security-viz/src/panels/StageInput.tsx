@@ -13,14 +13,50 @@ export type StageInputProps = {
   error: string | null;
 };
 
+type StatusVariant = "live" | "connecting" | "error" | "offline";
+
+function getStatus(connState: ConnState, error: string | null): StatusVariant {
+  if (connState === "ready") return "live";
+  if (connState === "connecting") return "connecting";
+  if (error) return "error";
+  return "offline";
+}
+
+const STATUS_CONFIG = {
+  live:       { dot: "cp-dot-live",       label: "Live Monitoring",  sub: "Subscribed",  card: "cp-status-card-live" },
+  connecting: { dot: "cp-dot-connecting", label: "Handshaking…",     sub: "Connecting",  card: "cp-status-card-connecting" },
+  error:      { dot: "cp-dot-error",      label: "Connection Error", sub: "Error",       card: "cp-status-card-error" },
+  offline:    { dot: "cp-dot-offline",    label: "Offline",          sub: "Disconnected",card: "cp-status-card-offline" },
+};
+
 export function StageInput(props: StageInputProps) {
   const busy = props.connState === "connecting";
   const live = props.connState === "ready";
+  const variant = getStatus(props.connState, props.error);
+  const cfg = STATUS_CONFIG[variant];
+
   return (
-    <div className="panel">
-      <h2>OpenClaw gateway</h2>
-      <div className="row" style={{ marginTop: 10 }}>
-        <div className="field" style={{ flex: 2 }}>
+    <div className="cp-panel">
+      {/* 패널 헤더 */}
+      <div className="cp-header">
+        <span className="cp-header-title">Connection Panel</span>
+        <span className="cp-header-sub">AI Agent</span>
+      </div>
+
+      {/* 상태 카드 */}
+      <div className={`cp-status-card ${cfg.card}`}>
+        <div className="cp-status-top">
+          <span className="cp-status-label">GATEWAY STATUS</span>
+          <span className={`cp-dot ${cfg.dot}`} />
+        </div>
+        <div className="cp-status-main">{cfg.label}</div>
+        <div className="cp-status-sub">{cfg.sub}</div>
+      </div>
+
+      {/* 구분선 + 섹션 */}
+      <div className="cp-section">
+        <span className="cp-section-label">Connection</span>
+        <div className="field">
           <label htmlFor="ws">WebSocket URL</label>
           <input
             id="ws"
@@ -30,10 +66,8 @@ export function StageInput(props: StageInputProps) {
             autoComplete="off"
           />
         </div>
-      </div>
-      <div className="row" style={{ marginTop: 8 }}>
-        <div className="field" style={{ flex: 2 }}>
-          <label htmlFor="sess">Session key</label>
+        <div className="field">
+          <label htmlFor="sess">Session Key</label>
           <input
             id="sess"
             value={props.sessionKey}
@@ -42,8 +76,8 @@ export function StageInput(props: StageInputProps) {
             autoComplete="off"
           />
         </div>
-        <div className="field" style={{ flex: 2 }}>
-          <label htmlFor="tok">Gateway token</label>
+        <div className="field">
+          <label htmlFor="tok">Gateway Token</label>
           <input
             id="tok"
             type="password"
@@ -54,18 +88,23 @@ export function StageInput(props: StageInputProps) {
           />
         </div>
       </div>
-      <div className="row" style={{ marginTop: 10 }}>
-        <button type="button" className="primary" disabled={busy} onClick={props.onConnect}>
-          {busy ? "Connecting…" : "Connect"}
-        </button>
-        <button type="button" disabled={!live && !busy} onClick={props.onDisconnect}>
-          Disconnect
-        </button>
-        <span className={`pill ${live ? "ok" : props.error ? "err" : ""}`}>
-          {live ? "Subscribed" : props.connState === "connecting" ? "Handshaking" : props.error ? "Error" : "Offline"}
-        </span>
+
+      {/* 액션 버튼 */}
+      <div className="cp-section">
+        <span className="cp-section-label">Actions</span>
+        <div className="cp-btn-row">
+          <button className="cp-btn-connect" type="button" disabled={busy} onClick={props.onConnect}>
+            {busy ? "Connecting…" : "Connect"}
+          </button>
+          <button className="cp-btn-disconnect" type="button" disabled={!live && !busy} onClick={props.onDisconnect}>
+            Disconnect
+          </button>
+        </div>
       </div>
-      {props.error ? <p className="muted" style={{ color: "var(--danger)" }}>{props.error}</p> : null}
+
+      {props.error && (
+        <p className="cp-error">{props.error}</p>
+      )}
     </div>
   );
 }

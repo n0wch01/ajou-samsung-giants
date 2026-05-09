@@ -29,6 +29,9 @@ cleanup() {
   for p in "${PIDS[@]:-}"; do
     kill "$p" 2>/dev/null || true
   done
+  echo "" >&2
+  echo "[run-viz] OpenClaw 게이트웨이 종료 중…" >&2
+  openclaw gateway stop >&2 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -89,7 +92,6 @@ if [[ ! -d node_modules ]]; then
 fi
 
 echo "" >&2
-echo "[run-viz] Ctrl+C 로 Vite + ingest 종료." >&2
 echo "" >&2
 
 npm run dev

@@ -1,6 +1,47 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
+import { extractUserUtteranceFromInternalSlugPrompt } from "../lib/userChatDisplay";
 import { apiPath } from "../lib/publicAsset";
+
+type RealtimeFinding = {
+  id: string;
+  category?: string;
+  title: string;
+};
+
+function useRealtimeFindings(active: boolean, clearKey: number | undefined): RealtimeFinding[] {
+  const [findings, setFindings] = useState<RealtimeFinding[]>([]);
+  const seenIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setFindings([]);
+    seenIds.current = new Set();
+    void fetch(apiPath("/api/sentinel/findings-realtime/clear"), { method: "POST" }).catch(() => {});
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/findings-realtime"));
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; findings?: unknown[] };
+        if (!json.ok || !Array.isArray(json.findings)) return;
+        const fresh = (json.findings as RealtimeFinding[]).filter(
+          (f) => f.id && !seenIds.current.has(f.id),
+        );
+        fresh.forEach((f) => seenIds.current.add(f.id));
+        if (fresh.length > 0) setFindings((prev) => [...prev, ...fresh]);
+      } catch { /* silent */ }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 1500);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  return findings;
+}
 
 type S3Verdict = {
   verdict: "pass" | "blocked" | "fail" | "pending";
@@ -469,7 +510,11 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
       const p = payloadOf(e);
       const role = getRole(p, e.kind);
       const text = getText(p) || e.subtitle || "";
-      if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+      if (isUser(role) && text.trim()) {
+        // OpenClaw가 sessions.reset 후 내부적으로 주입하는 title/slug 생성 프롬프트는 스킵
+        if (extractUserUtteranceFromInternalSlugPrompt(text) !== null) continue;
+        lastUserIdx = i; break;
+      }
     }
   }
   if (lastUserIdx === -1) return null;

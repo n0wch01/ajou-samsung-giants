@@ -95,7 +95,12 @@ async def _send_once(
         if reset_first:
             # 이전 대화 히스토리로 인한 tool-call hallucination 방지
             # sleep 없이 즉시 전송 — 리셋 후 갭을 두면 다른 세션의 내부 프롬프트(title generation 등)가 끼어들 수 있음
-            await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=15.0)
+            # 리셋 실패(권한 부족·미지원·타임아웃) 시 경고만 출력하고 chat.send는 계속 진행
+            try:
+                await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=5.0)
+            except Exception as e:
+                import sys
+                print(f"[warn] sessions.reset 실패 (무시하고 계속): {e}", file=sys.stderr)
 
         params = _build_chat_params(session_key, message)
         return await sess.rpc(chat_method, params, timeout_s=120.0)

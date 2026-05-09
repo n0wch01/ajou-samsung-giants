@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { publicAsset } from "../lib/publicAsset";
+import { normalizeUserChatDisplay } from "../lib/userChatDisplay";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import { type GwFrame } from "../gateway/protocol";
 import { apiPath } from "../lib/publicAsset";
@@ -31,15 +32,19 @@ export type ToolLine = {
   mergeKey: string;
 };
 
+/** assistant 메시지: 텍스트 + 그 안에 포함된 tool invocation pill들 */
+type AssistantEvent = { kind: "assistant"; text: string; toolCalls: ToolLine[] };
+/** session.tool 등에서 오는 독립 tool result 카드 */
+type ToolResultEvent = { kind: "tool_result"; tool: ToolLine };
+
+type TurnEvent = AssistantEvent | ToolResultEvent;
+
 type ChatTurn = {
   id: string;
   at: number;
   userText: string;
-  /** source metadata badge (origin/clientId) */
   userMeta?: string;
-  /** assistant 등 답변 텍스트(스트리밍 시 길이가 이어지면 마지막 청크만 갱신) */
-  assistantChunks: string[];
-  tools: ToolLine[];
+  events: TurnEvent[];
 };
 
 function payloadOf(e: TimelineEntry): Record<string, unknown> | undefined {
@@ -58,21 +63,25 @@ function nestedMessageObj(p: Record<string, unknown> | undefined): Record<string
   return undefined;
 }
 
-/** 채팅 말풍선용: 게이트웨이가 덧붙인 Sender 메타·코드 펜스·선행 `[날짜]` 접두 제거 */
-function stripUserBubbleDecorations(raw: string): string {
-  let s = raw.replace(/\r\n/g, "\n");
-  s = s.replace(
-    /^Sender\s*\(untrusted metadata\):\s*(?:\n\s*)?```(?:json)?\s*\n[\s\S]*?```\s*/im,
-    "",
-  );
-  s = s.replace(/^Sender\s*\(untrusted metadata\):\s*\{[\s\S]*?\}\s*/im, "");
-  s = s.trim();
-  for (let i = 0; i < 4; i++) {
-    const next = s.replace(/^\[[^\]]+\]\s*/, "").trim();
-    if (next === s) break;
-    s = next;
+function partsText(parts: unknown): string {
+  if (!Array.isArray(parts)) return "";
+  const chunks: string[] = [];
+  for (const part of parts) {
+    if (!part || typeof part !== "object") continue;
+    const po = part as Record<string, unknown>;
+    // text_delta 같은 스트리밍 청크 포함
+    if (typeof po.type === "string" && po.type.includes("delta")) {
+      const d = po.delta ?? po;
+      if (d && typeof d === "object") {
+        const dv = (d as Record<string, unknown>).text ?? (d as Record<string, unknown>).content;
+        if (typeof dv === "string") chunks.push(dv);
+      }
+      continue;
+    }
+    const t = po.text ?? po.content;
+    if (typeof t === "string") chunks.push(t);
   }
-  return s.trim();
+  return chunks.join("").trim();
 }
 
 function messageText(p: Record<string, unknown> | undefined): string {
@@ -83,24 +92,17 @@ function messageText(p: Record<string, unknown> | undefined): string {
   }
   const topMsg = p.message;
   if (typeof topMsg === "string" && topMsg.trim()) return topMsg;
+  // 최상위 parts 배열
+  const topParts = partsText(p.parts ?? p.content);
+  if (topParts) return topParts.slice(0, 8000);
   const inner = nestedMessageObj(p);
   if (inner) {
     for (const key of ["text", "content", "body"] as const) {
       const v = inner[key];
       if (typeof v === "string" && v.trim()) return v;
     }
-    const parts = inner.parts ?? inner.content;
-    if (Array.isArray(parts)) {
-      const chunks: string[] = [];
-      for (const part of parts) {
-        if (!part || typeof part !== "object") continue;
-        const po = part as Record<string, unknown>;
-        const t = po.text ?? po.content;
-        if (typeof t === "string") chunks.push(t);
-      }
-      const joined = chunks.join("").trim();
-      if (joined) return joined.slice(0, 8000);
-    }
+    const innerParts = partsText(inner.parts ?? inner.content);
+    if (innerParts) return innerParts.slice(0, 8000);
   }
   return "";
 }
@@ -295,7 +297,11 @@ function lastMeaningfulLine(s: string): string {
 
 function isSameResponse(a: string, b: string): boolean {
   if (a === b) return true;
-  if (a.includes(b) || b.includes(a)) return true;
+  // 스트리밍 누적 텍스트: 새 청크는 항상 이전 청크로 시작 (prefix 관계)
+  if (b.startsWith(a) || a.startsWith(b)) return true;
+  // 도구 호출 전후 응답 병합: 충분히 긴 문자열에만 적용해 오병합 방지
+  const MIN = 20;
+  if (a.length >= MIN && b.length >= MIN && (a.includes(b) || b.includes(a))) return true;
   // 마지막 줄이 같고 10자 이상이면 같은 응답
   const la = lastMeaningfulLine(a);
   const lb = lastMeaningfulLine(b);
@@ -303,17 +309,86 @@ function isSameResponse(a: string, b: string): boolean {
   return false;
 }
 
-function pushAssistantChunk(chunks: string[], raw: string): void {
-  const t = raw.trim();
-  if (!t) return;
-  for (let i = 0; i < chunks.length; i++) {
-    if (isSameResponse(chunks[i], t)) {
-      // 같은 응답이면 더 긴 쪽 유지
-      if (t.length > chunks[i].length) chunks[i] = t;
+/** assistant 카드(텍스트+인라인 tool call): 스트리밍 중 같은 응답이면 업데이트, 아니면 추가 */
+function pushAssistantEvent(events: TurnEvent[], text: string, inlineTools: ToolLine[]): void {
+  const t = text.trim();
+  // tool_result 경계를 넘지 않고 가장 최근 assistant 이벤트와 병합
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    if (ev.kind === "tool_result") break;
+    if (ev.kind !== "assistant") continue;
+    if (!t || isSameResponse(ev.text, t)) {
+      if (t.length > ev.text.length) ev.text = t;
+      for (const tc of inlineTools) mergeToolCallIntoList(ev.toolCalls, tc);
+      return;
+    }
+    break; // 다른 텍스트 내용 → 새 카드
+  }
+  if (!t && inlineTools.length === 0) return;
+  const calls: ToolLine[] = [];
+  for (const tc of inlineTools) mergeToolCallIntoList(calls, tc);
+  events.push({ kind: "assistant", text: t, toolCalls: calls });
+}
+
+function mergeToolCallIntoList(list: ToolLine[], tc: ToolLine): void {
+  const cur: ToolLine = { ...tc, meta: pillMetaForToolLine(tc) };
+  const tail = mergeKeyTail(cur.mergeKey);
+  if (tail) {
+    const ex = list.find((x) => mergeKeyTail(x.mergeKey) === tail);
+    if (ex) {
+      if ((cur.outputFull?.length ?? 0) > (ex.outputFull?.length ?? 0)) ex.outputFull = cur.outputFull;
+      if (cur.argsFull?.trim() && !ex.argsFull?.trim()) ex.argsFull = cur.argsFull;
+      ex.id = cur.id;
+      ex.meta = pillMetaForToolLine(ex);
       return;
     }
   }
-  chunks.push(t);
+  list.push(cur);
+}
+
+/** 독립 tool result 카드 (session.tool 이벤트) */
+function attachToolResultEvent(events: TurnEvent[], line: ToolLine): void {
+  const cur: ToolLine = { ...line, meta: pillMetaForToolLine(line) };
+  const tail = mergeKeyTail(cur.mergeKey);
+
+  if (tail) {
+    for (let i = events.length - 1; i >= 0; i--) {
+      const ev = events[i];
+      if (ev.kind !== "tool_result") continue;
+      if (mergeKeyTail(ev.tool.mergeKey) !== tail) continue;
+      if ((cur.outputFull?.length ?? 0) > (ev.tool.outputFull?.length ?? 0)) ev.tool.outputFull = cur.outputFull;
+      if (cur.argsFull?.trim() && !ev.tool.argsFull?.trim()) ev.tool.argsFull = cur.argsFull;
+      ev.tool.id = cur.id;
+      ev.tool.meta = pillMetaForToolLine(ev.tool);
+      return;
+    }
+  }
+
+  const last = events[events.length - 1];
+  if (last?.kind === "tool_result") {
+    const lt = last.tool;
+    if (!isGenericToolName(lt.name) && isGenericToolName(cur.name)) {
+      if ((cur.outputFull?.length ?? 0) > (lt.outputFull?.length ?? 0)) lt.outputFull = cur.outputFull;
+      lt.id = cur.id;
+      lt.meta = pillMetaForToolLine(lt);
+      return;
+    }
+    if (lt.name === cur.name) {
+      const lo = cur.outputFull?.length ?? 0;
+      const eo = lt.outputFull?.length ?? 0;
+      const argsUp = cur.argsFull?.trim() && !lt.argsFull?.trim();
+      if (lo > eo || argsUp) {
+        if (lo > eo) lt.outputFull = cur.outputFull;
+        if (argsUp) lt.argsFull = cur.argsFull;
+        lt.id = cur.id;
+        lt.meta = pillMetaForToolLine(lt);
+        return;
+      }
+      if ((cur.argsFull || "") === (lt.argsFull || "") && (cur.outputFull || "") === (lt.outputFull || "")) return;
+    }
+  }
+
+  events.push({ kind: "tool_result", tool: cur });
 }
 
 function firstNonEmptyString(...vals: unknown[]): string {
@@ -639,96 +714,15 @@ function pillMetaForToolLine(t: ToolLine): string {
   return "";
 }
 
-/** 한 번의 호출로 보이게: 직전 실제 도구 행에 `tool`·running 스텝 흡수, 동일 id 중복 행 병합 */
-function finalizeToolRows(lines: ToolLine[]): ToolLine[] {
-  const out: ToolLine[] = [];
-  for (const raw of lines) {
-    const cur: ToolLine = {
-      ...raw,
-      meta: pillMetaForToolLine(raw),
-    };
-
-    const last = out[out.length - 1];
-    if (last && !isGenericToolName(last.name) && isGenericToolName(cur.name)) {
-      if ((cur.outputFull?.length ?? 0) > (last.outputFull?.length ?? 0)) last.outputFull = cur.outputFull;
-      if (cur.argsFull?.trim() && !last.argsFull?.trim()) last.argsFull = cur.argsFull;
-      last.id = cur.id;
-      last.meta = pillMetaForToolLine(last);
-      continue;
-    }
-
-    const tail = mergeKeyTail(cur.mergeKey);
-    if (last && tail && tail === mergeKeyTail(last.mergeKey) && last.name === cur.name) {
-      if ((cur.outputFull?.length ?? 0) > (last.outputFull?.length ?? 0)) last.outputFull = cur.outputFull;
-      if (cur.argsFull?.trim() && !last.argsFull?.trim()) last.argsFull = cur.argsFull;
-      last.id = cur.id;
-      last.meta = pillMetaForToolLine(last);
-      continue;
-    }
-
-    out.push(cur);
-  }
-  return out;
-}
-
 function mergeKeyTail(key: string): string {
   const i = key.indexOf("#");
   return i >= 0 ? key.slice(i + 1) : "";
 }
 
-/** 동일 tool_call id·연속 갱신 프레임을 한 줄로 합침 */
-function attachToolLine(bucket: ToolLine[], line: ToolLine): void {
-  const tail = mergeKeyTail(line.mergeKey);
-  if (tail) {
-    for (let i = bucket.length - 1; i >= 0; i--) {
-      const ex = bucket[i];
-      if (mergeKeyTail(ex.mergeKey) !== tail) continue;
-      let changed = false;
-      if ((line.outputFull?.length ?? 0) > (ex.outputFull?.length ?? 0)) {
-        ex.outputFull = line.outputFull;
-        changed = true;
-      }
-      if (line.argsFull?.trim() && !ex.argsFull?.trim()) {
-        ex.argsFull = line.argsFull;
-        changed = true;
-      }
-      if (line.meta) {
-        const meta = [ex.meta, line.meta].filter(Boolean).join(" · ");
-        if (meta && meta !== ex.meta) {
-          ex.meta = meta;
-          changed = true;
-        }
-      }
-      if (changed) ex.id = line.id;
-      return;
-    }
-  }
-  const last = bucket[bucket.length - 1];
-  if (last && last.name === line.name) {
-    const identical =
-      (line.argsFull || "") === (last.argsFull || "") &&
-      (line.outputFull || "") === (last.outputFull || "") &&
-      (line.meta || "") === (last.meta || "");
-    if (identical) return;
-
-    const lo = line.outputFull?.length ?? 0;
-    const eo = last.outputFull?.length ?? 0;
-    if (lo > eo || (line.argsFull?.trim() && !last.argsFull?.trim()) || (line.meta && line.meta !== last.meta)) {
-      if (lo > eo) last.outputFull = line.outputFull;
-      if (line.argsFull?.trim() && !last.argsFull?.trim()) last.argsFull = line.argsFull;
-      if (line.meta) last.meta = [last.meta, line.meta].filter(Boolean).join(" · ");
-      last.id = line.id;
-      return;
-    }
-  }
-  bucket.push(line);
-}
-
 /** 다음 사용자 메시지 전까지의 도구·assistant 답변을 한 턴으로 묶음 */
 function buildChatTurns(entries: TimelineEntry[]): {
   turns: ChatTurn[];
-  orphanTools: ToolLine[];
-  orphanAssistantChunks: string[];
+  orphanEvents: TurnEvent[];
 } {
   const visible = entries.filter((e) => {
     if (e.eventName === "viz.synthetic") return false;
@@ -744,17 +738,18 @@ function buildChatTurns(entries: TimelineEntry[]): {
   });
 
   const turns: ChatTurn[] = [];
-  const orphanTools: ToolLine[] = [];
-  const orphanAssistantChunks: string[] = [];
+  const orphanEvents: TurnEvent[] = [];
   let current: ChatTurn | null = null;
 
-  const pushTool = (e: TimelineEntry) => {
+  const targetEvents = (): TurnEvent[] => current ? current.events : orphanEvents;
+
+  const makeToolLine = (e: TimelineEntry): ToolLine => {
     const p = payloadOf(e);
     const name = resolveToolDisplayName(e, p);
     const status = typeof p?.status === "string" ? p.status : "";
     const phase = typeof p?.phase === "string" ? p.phase : "";
     const meta = [status, phase].filter(Boolean).join(" · ");
-    const line: ToolLine = {
+    return {
       id: e.id,
       name,
       meta,
@@ -762,13 +757,12 @@ function buildChatTurns(entries: TimelineEntry[]): {
       outputFull: toolOutputFull(p),
       mergeKey: toolMergeKey(p, name),
     };
-    if (current) attachToolLine(current.tools, line);
-    else attachToolLine(orphanTools, line);
   };
 
   for (const e of visible) {
+    // session.tool → 독립 tool result 카드
     if (e.kind === "session.tool") {
-      pushTool(e);
+      attachToolResultEvent(targetEvents(), makeToolLine(e));
       continue;
     }
 
@@ -779,9 +773,8 @@ function buildChatTurns(entries: TimelineEntry[]): {
     if (e.kind === "chat" || e.kind === "session.message") {
       if (isUserRole(role)) {
         const rawUserText = text.trim();
-        const clean = stripUserBubbleDecorations(rawUserText) || "(내용 없음)";
+        const clean = normalizeUserChatDisplay(rawUserText) || "(내용 없음)";
         const meta = userSourceBadge(p, rawUserText);
-        /* messages + session 이중 구독 등으로 동일 사용자 프레임이 두 번 올 때 */
         if (
           current &&
           current.userText === clean &&
@@ -791,68 +784,34 @@ function buildChatTurns(entries: TimelineEntry[]): {
           continue;
         }
         if (current) turns.push(current);
-        current = {
-          id: e.id,
-          at: e.at,
-          userText: clean,
-          userMeta: meta,
-          assistantChunks: [],
-          tools: [],
-        };
+        current = { id: e.id, at: e.at, userText: clean, userMeta: meta, events: [] };
         continue;
       }
-      /* assistant 등: 도구 + 답변 텍스트 */
-      for (const line of embeddedToolLines(e, p)) {
-        if (current) attachToolLine(current.tools, line);
-        else attachToolLine(orphanTools, line);
-      }
-      if (shouldCaptureAssistantText(role) && text.trim() && !SKIP_TEXT_RE.test(text.trim())) {
-        if (current) pushAssistantChunk(current.assistantChunks, text);
-        else pushAssistantChunk(orphanAssistantChunks, text);
+      // assistant: 텍스트 + 임베드된 tool call → 한 카드
+      if (shouldCaptureAssistantText(role) || embeddedToolLines(e, p).length > 0) {
+        const inline = embeddedToolLines(e, p);
+        const t = shouldCaptureAssistantText(role) && !SKIP_TEXT_RE.test(text.trim()) ? text : "";
+        if (t.trim() || inline.length > 0) pushAssistantEvent(targetEvents(), t, inline);
       }
     }
 
     if (e.kind === "other") {
-      for (const line of embeddedToolLines(e, p)) {
-        if (current) attachToolLine(current.tools, line);
-        else attachToolLine(orphanTools, line);
-      }
+      const inline = embeddedToolLines(e, p);
       const reply = messageText(p) || (typeof e.subtitle === "string" ? e.subtitle : "");
-      if (reply.trim() && !SKIP_TEXT_RE.test(reply.trim()) && shouldCaptureAssistantText(roleOf(p, e.kind))) {
-        if (current) pushAssistantChunk(current.assistantChunks, reply);
-        else pushAssistantChunk(orphanAssistantChunks, reply);
+      const captureText = reply.trim() && !SKIP_TEXT_RE.test(reply.trim()) && shouldCaptureAssistantText(roleOf(p, e.kind));
+      if (captureText || inline.length > 0) {
+        pushAssistantEvent(targetEvents(), captureText ? reply : "", inline);
       }
     }
   }
   if (current) turns.push(current);
 
-  function finalizeChunks(chunks: string[]): string[] {
-    const out: string[] = [];
-    for (const t of chunks) {
-      const idx = out.findIndex((r) => isSameResponse(r, t));
-      if (idx >= 0) {
-        if (t.length > out[idx].length) out[idx] = t;
-      } else {
-        out.push(t);
-      }
-    }
-    return out;
-  }
-
-  return {
-    turns: turns.map((t) => ({
-      ...t,
-      tools: finalizeToolRows(t.tools),
-      assistantChunks: finalizeChunks(t.assistantChunks),
-    })),
-    orphanTools: finalizeToolRows(orphanTools),
-    orphanAssistantChunks: finalizeChunks(orphanAssistantChunks),
-  };
+  return { turns, orphanEvents };
 }
 
 export function MessageToolFlow(props: MessageToolFlowProps) {
   const [openToolId, setOpenToolId] = useState<string | null>(null);
-  const { turns, orphanTools, orphanAssistantChunks } = useMemo(
+  const { turns, orphanEvents } = useMemo(
     () => buildChatTurns(props.entries),
     [props.entries],
   );
@@ -861,7 +820,6 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
 
-  // 사용자가 위로 스크롤하면 자동 스크롤 잠시 중단
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -873,26 +831,68 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
     return () => el.removeEventListener("scroll", onScroll);
   }, []);
 
-  // 새 메시지/이벤트가 오면 바닥으로 스크롤
   useEffect(() => {
     if (!userScrolledUp.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [turns, orphanAssistantChunks]);
+  }, [turns, orphanEvents]);
 
   if (props.connState !== "ready") {
     return (
       <section className="kakao-room kakao-room-empty">
-        <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
-        <p className="kakao-room-hint">
-          OpenClaw에서 쓰는 것과 <strong>같은 세션 키</strong>로 연결하면, 여기 채팅방에 내 메시지·답변·그때 호출된 도구가 보입니다.
-        </p>
+        <div className="chat-empty-state">
+          <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
+          <h3 className="chat-empty-title">Gateway Not Connected</h3>
+          <p className="chat-empty-desc">
+            왼쪽 패널에서 WebSocket URL과 토큰을 입력한 뒤<br />
+            <strong>Connect</strong>를 눌러 OpenClaw Gateway에 연결하세요.
+          </p>
+          <div className="chat-empty-steps">
+            <div className="chat-empty-step"><span className="chat-empty-step-num">1</span>WebSocket URL 입력</div>
+            <div className="chat-empty-step-arrow">→</div>
+            <div className="chat-empty-step"><span className="chat-empty-step-num">2</span>세션 키 · 토큰 입력</div>
+            <div className="chat-empty-step-arrow">→</div>
+            <div className="chat-empty-step"><span className="chat-empty-step-num">3</span>Connect 클릭</div>
+          </div>
+        </div>
       </section>
     );
   }
 
-  const empty =
-    turns.length === 0 && orphanTools.length === 0 && orphanAssistantChunks.length === 0;
+  const empty = turns.length === 0 && orphanEvents.length === 0;
+
+  const renderEvents = (events: TurnEvent[]) =>
+    events.map((ev, i) =>
+      ev.kind === "assistant" ? (
+        <div key={i} className="kakao-row-assistant">
+          <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
+          <div className="kakao-bubble-assistant kakao-bubble-md">
+            {ev.text && (
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{ev.text}</ReactMarkdown>
+            )}
+            {ev.toolCalls.length > 0 && (
+              <div className="kakao-inline-tools">
+                <ToolList
+                  tools={ev.toolCalls}
+                  align="left"
+                  openToolId={openToolId}
+                  setOpenToolId={setOpenToolId}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div key={ev.tool.id} className="kakao-tool-result-event">
+          <ToolList
+            tools={[ev.tool]}
+            align="right"
+            openToolId={openToolId}
+            setOpenToolId={setOpenToolId}
+          />
+        </div>
+      ),
+    );
 
   return (
     <section className="kakao-room">
@@ -902,31 +902,25 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
       </div>
       <div className="kakao-room-scroll" ref={scrollRef}>
         {empty ? (
-          <p className="kakao-room-wait">이 세션에서 메시지를 내면 여기에 표시됩니다.</p>
-        ) : null}
-
-        {orphanAssistantChunks.length > 0 ? (
-          <div className="kakao-orphan">
-            <div className="kakao-orphan-label">사용자 메시지 이전 답변</div>
-            <div className="kakao-row-assistant">
-              <div className="kakao-bubble-assistant kakao-bubble-md">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {orphanAssistantChunks.join("\n\n")}
-                </ReactMarkdown>
-              </div>
-            </div>
+          <div className="chat-empty-state chat-empty-state-inline">
+            <img src={publicAsset("chito.png")} alt="chito" className="kakao-empty-illust" />
+            <h3 className="chat-empty-title">No session activity yet</h3>
+            <p className="chat-empty-desc">
+              테스트 프롬프트를 입력하면 Agent 응답과<br />보안 이벤트가 이곳에 실시간으로 표시됩니다.
+            </p>
+            <ul className="chat-empty-list">
+              <li><span className="chat-empty-badge badge-blue">Agent</span>Agent Message &amp; Response</li>
+              <li><span className="chat-empty-badge badge-purple">Tool</span>Tool Invocation</li>
+              <li><span className="chat-empty-badge badge-orange">Policy</span>Policy Violation</li>
+              <li><span className="chat-empty-badge badge-red">Alert</span>Sentinel Alert</li>
+            </ul>
           </div>
         ) : null}
 
-        {orphanTools.length > 0 ? (
+        {orphanEvents.length > 0 ? (
           <div className="kakao-orphan">
-            <div className="kakao-orphan-label">사용자 메시지 이전에 수집된 도구</div>
-            <ToolList
-              tools={orphanTools}
-              align="left"
-              openToolId={openToolId}
-              setOpenToolId={setOpenToolId}
-            />
+            <div className="kakao-orphan-label">사용자 메시지 이전 이벤트</div>
+            {renderEvents(orphanEvents)}
           </div>
         ) : null}
 
@@ -941,31 +935,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
                 <div className="kakao-bubble-user">{turn.userText}</div>
               </div>
             </div>
-            <div className="kakao-tools-block">
-              {turn.tools.length > 0 ? (
-                <>
-                  <div className="kakao-tools-caption">이 메시지 이후 호출된 도구</div>
-                  <ToolList
-                    tools={turn.tools}
-                    align="right"
-                    openToolId={openToolId}
-                    setOpenToolId={setOpenToolId}
-                  />
-                </>
-              ) : (
-                <div className="kakao-tools-none">연결된 도구 호출 기록 없음</div>
-              )}
-            </div>
-            {turn.assistantChunks.length > 0 ? (
-              <div className="kakao-row-assistant kakao-row-assistant-after-tools">
-                <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
-                <div className="kakao-bubble-assistant kakao-bubble-md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {turn.assistantChunks.join("\n\n")}
-                  </ReactMarkdown>
-                </div>
-              </div>
-            ) : null}
+            {renderEvents(turn.events)}
           </div>
         ))}
         <div ref={bottomRef} />
