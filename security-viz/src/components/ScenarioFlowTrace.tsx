@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
+import { extractUserUtteranceFromInternalSlugPrompt } from "../lib/userChatDisplay";
 import { apiPath } from "../lib/publicAsset";
 
 type RealtimeFinding = {
@@ -509,7 +510,11 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
       const p = payloadOf(e);
       const role = getRole(p, e.kind);
       const text = getText(p) || e.subtitle || "";
-      if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+      if (isUser(role) && text.trim()) {
+        // OpenClaw가 sessions.reset 후 내부적으로 주입하는 title/slug 생성 프롬프트는 스킵
+        if (extractUserUtteranceFromInternalSlugPrompt(text) !== null) continue;
+        lastUserIdx = i; break;
+      }
     }
   }
   if (lastUserIdx === -1) return null;

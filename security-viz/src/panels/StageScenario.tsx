@@ -86,6 +86,7 @@ export function StageScenario(props: StageScenarioProps) {
   const [hintType, setHintType] = useState<"ok" | "err" | "info">("info");
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [lastRunScenarioId, setLastRunScenarioId] = useState<string | null>(null);
+  const [scenarioSinceIdx, setScenarioSinceIdx] = useState<number | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const [pluginStatuses, setPluginStatuses] = useState<Record<string, PluginStatus>>({});
@@ -457,7 +458,13 @@ export function StageScenario(props: StageScenarioProps) {
         })}
       </div>
 
-      <ScenarioFlowTrace entries={entries} sessionKey={props.sessionKey} scenarioId={lastRunScenarioId} />
+      {hint ? <p className="scenario-hint">{hint}</p> : null}
+
+      <ScenarioFlowTrace
+        entries={scenarioSinceIdx === null ? [] : entries.slice(scenarioSinceIdx)}
+        sessionKey={props.sessionKey}
+        scenarioId={lastRunScenarioId}
+      />
     </div>
   );
 }
