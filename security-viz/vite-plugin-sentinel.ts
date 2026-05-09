@@ -118,6 +118,45 @@ let lastExitCode: number | null = null;
 let stderrBuf = "";
 let spawnError: string | null = null;
 
+// Exfil collector — mock plugin이 실제 fetch로 전송을 시도할 때 수신
+type ExfilRecord = {
+  id: string;
+  ts: number;
+  source: string;
+  destination: string;
+  bytes: number;
+  correlation_id: string;
+  payload: string;
+  blocked: boolean;
+};
+const exfilLog: ExfilRecord[] = [];
+
+/** 외부 fetch 승인 게이트(인터셉터 기본 ON — SENTINEL_FETCH_GATE=0 으로 비활성) */
+type FetchGateEntry = {
+  id: string;
+  url: string;
+  method: string;
+  payload: string;
+  bytes: number;
+  source: string;
+  ts: number;
+  status: "pending" | "approved" | "denied";
+};
+const fetchGateById = new Map<string, FetchGateEntry>();
+
+function fetchGateTimeoutMs(): number {
+  const v = Number(process.env.SENTINEL_FETCH_GATE_TIMEOUT_MS);
+  return Number.isFinite(v) && v > 0 ? v : 180_000;
+}
+
+function pruneFetchGateResolved(): void {
+  const now = Date.now();
+  const ttl = 3_600_000;
+  for (const [id, e] of fetchGateById) {
+    if (e.status !== "pending" && now - e.ts > ttl) fetchGateById.delete(id);
+  }
+}
+
 // Auto-detect: trace.jsonl 변경 감지 → detect.py 자동 실행 → 결과 캐시
 let cachedReport: unknown = null;
 let cachedReportAt: number | null = null;
@@ -722,6 +761,177 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        // ── Exfil 수집기 ─────────────────────────────────────────────────────
+        if (url === "/api/sentinel/exfil-collect" && req.method === "POST") {
+          // CORS — mock plugin(openclaw process)에서 직접 호출
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          const body = await readJsonBody(req).catch(() => ({}));
+          const record: ExfilRecord = {
+            id: `exfil-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            ts: Date.now(),
+            source: String(body.source ?? "unknown"),
+            destination: "http://localhost:5173/api/sentinel/exfil-collect",
+            bytes: Number(body.bytes ?? 0),
+            correlation_id: String(body.correlation_id ?? ""),
+            payload: String(body.payload ?? ""),
+            blocked: Boolean(body.blocked),
+          };
+          exfilLog.push(record);
+          console.error(`[sentinel-exfil] received ${record.bytes}B from ${record.source} (${record.correlation_id})`);
+          sendJson(res, 200, { ok: true, received: record.bytes });
+          return;
+        }
+
+        if (url === "/api/sentinel/exfil-collect" && req.method === "OPTIONS") {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+          res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+          res.writeHead(204); res.end();
+          return;
+        }
+
+        if (url === "/api/sentinel/exfil-log" && req.method === "GET") {
+          sendJson(res, 200, { ok: true, log: exfilLog });
+          return;
+        }
+
+        if (url === "/api/sentinel/exfil-log/clear" && req.method === "POST") {
+          exfilLog.length = 0;
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        // ── 외부 fetch 승인 게이트 ───────────────────────────────────────────
+        if (url === "/api/sentinel/fetch-gate/register" && req.method === "POST") {
+          res.setHeader("Access-Control-Allow-Origin", "*");
+          const body = await readJsonBody(req).catch(() => ({}));
+          const id = String(body.id ?? "").trim();
+          if (!id) {
+            sendJson(res, 400, { ok: false, message: "id가 필요합니다." });
+            return;
+          }
+          pruneFetchGateResolved();
+          const urlStr = String(body.intercepted_url ?? body.url ?? "").trim();
+          const entry: FetchGateEntry = {
+            id,
+            url: urlStr,
+            method: String(body.intercepted_method ?? body.method ?? "GET").toUpperCase().slice(0, 32),
+            payload: String(body.payload ?? "").slice(0, 32_000),
+            bytes: Number(body.bytes ?? 0),
+            source: String(body.source ?? "fetch-interceptor").slice(0, 120),
+            ts: Date.now(),
+            status: "pending",
+          };
+          fetchGateById.set(id, entry);
+          console.error(`[sentinel-fetch-gate] pending ${entry.method} ${entry.url} (${id})`);
+          sendJson(res, 200, { ok: true, id });
+          return;
+        }
+
+        if (req.method === "GET" && (req.url?.split("?")[0] ?? "") === "/api/sentinel/fetch-gate/status") {
+          const raw = req.url ?? "";
+          const qs = raw.includes("?") ? raw.slice(raw.indexOf("?") + 1) : "";
+          const id = new URLSearchParams(qs).get("id")?.trim() ?? "";
+          if (!id) {
+            sendJson(res, 400, { ok: false, status: "unknown", message: "id query 필요" });
+            return;
+          }
+          const maxMs = fetchGateTimeoutMs();
+          const e = fetchGateById.get(id);
+          if (!e) {
+            sendJson(res, 200, { ok: true, status: "unknown" });
+            return;
+          }
+          if (e.status === "pending" && Date.now() - e.ts > maxMs) {
+            e.status = "denied";
+          }
+          sendJson(res, 200, { ok: true, status: e.status });
+          return;
+        }
+
+        if (url === "/api/sentinel/fetch-gate/pending" && req.method === "GET") {
+          const now = Date.now();
+          const maxMs = fetchGateTimeoutMs();
+          const items: FetchGateEntry[] = [];
+          for (const e of fetchGateById.values()) {
+            if (e.status === "pending" && now - e.ts > maxMs) e.status = "denied";
+            if (e.status === "pending") items.push({ ...e });
+          }
+          items.sort((a, b) => a.ts - b.ts);
+          sendJson(res, 200, { ok: true, items });
+          return;
+        }
+
+        if (url === "/api/sentinel/fetch-gate/approve" && req.method === "POST") {
+          const body = await readJsonBody(req).catch(() => ({}));
+          const id = String(body.id ?? "").trim();
+          const e = fetchGateById.get(id);
+          if (!e) {
+            sendJson(res, 404, { ok: false, message: "알 수 없는 id" });
+            return;
+          }
+          if (e.status !== "pending") {
+            sendJson(res, 409, { ok: false, message: "이미 처리된 요청입니다." });
+            return;
+          }
+          e.status = "approved";
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/fetch-gate/deny" && req.method === "POST") {
+          const body = await readJsonBody(req).catch(() => ({}));
+          const id = String(body.id ?? "").trim();
+          const e = fetchGateById.get(id);
+          if (!e) {
+            sendJson(res, 404, { ok: false, message: "알 수 없는 id" });
+            return;
+          }
+          if (e.status === "pending") e.status = "denied";
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/fetch-gate/clear-pending" && req.method === "POST") {
+          for (const e of fetchGateById.values()) {
+            if (e.status === "pending") e.status = "denied";
+          }
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/findings-realtime" && req.method === "GET") {
+          const rtPath = path.join(
+            path.dirname(defaultTracePath()),
+            "findings-realtime.jsonl",
+          );
+          const findings: unknown[] = [];
+          if (fs.existsSync(rtPath)) {
+            const lines = fs.readFileSync(rtPath, "utf-8").split("\n");
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed) continue;
+              try { findings.push(JSON.parse(trimmed)); } catch { /* skip */ }
+            }
+          }
+          sendJson(res, 200, { ok: true, findings });
+          return;
+        }
+
+        if (url === "/api/sentinel/findings-realtime/clear" && req.method === "POST") {
+          const rtPath = path.join(
+            path.dirname(defaultTracePath()),
+            "findings-realtime.jsonl",
+          );
+          try {
+            if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
+            sendJson(res, 200, { ok: true });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: String(e) });
+          }
+          return;
+        }
+
         if (url === "/api/sentinel/status" && req.method === "GET") {
           const trace = traceStat();
           const managedRunning = Boolean(child && !child.killed);
@@ -763,6 +973,120 @@ export function sentinelControlPlugin(): Plugin {
           } catch (e) {
             sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
           }
+          return;
+        }
+
+        // S3 Guardrail toggle: 플래그 파일 존재 = guardrail OFF (Direct 모드).
+        // ingest._maybe_auto_abort 가 abort 직전에 이 파일을 검사한다.
+        if (url === "/api/sentinel/s3-guardrail" && (req.method === "GET" || req.method === "POST")) {
+          const flagPath = path.join(path.dirname(defaultTracePath()), "s3-guardrail-disabled.flag");
+          try {
+            if (req.method === "POST") {
+              const body = await readJsonBody(req);
+              const desired = body.enabled;
+              if (typeof desired !== "boolean") {
+                sendJson(res, 400, { ok: false, message: "body.enabled must be boolean" });
+                return;
+              }
+              if (desired) {
+                // Guardrail ON = flag 제거
+                if (fs.existsSync(flagPath)) fs.rmSync(flagPath);
+              } else {
+                // Guardrail OFF = flag 생성
+                fs.writeFileSync(
+                  flagPath,
+                  `# S3 Guardrail disabled at ${new Date().toISOString()}\n` +
+                    `# Removing this file (or POST { enabled: true }) re-enables auto-abort.\n`,
+                );
+              }
+            }
+            const enabled = !fs.existsSync(flagPath);
+            sendJson(res, 200, { ok: true, enabled, flagPath });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
+        // S3 verdict: trace.jsonl 의 auto_abort meta + cachedReport 의 s3-* finding을 묶어
+        // PASS / BLOCKED / FAIL 중 하나로 판정. 시나리오 흐름 패널의 verdict 뱃지 데이터.
+        if (url === "/api/sentinel/s3-verdict" && req.method === "GET") {
+          const tp = defaultTracePath();
+          // trace.jsonl 의 마지막 auto_abort meta entry 찾기 (역순 스캔)
+          let abortPhase: string | null = null;
+          let abortOk: boolean | null = null;
+          let abortReason: string | null = null;
+          let abortAtMs: number | null = null;
+          try {
+            if (fs.existsSync(tp)) {
+              const lines = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
+              for (let i = lines.length - 1; i >= 0; i--) {
+                try {
+                  const obj = JSON.parse(lines[i]) as Record<string, unknown>;
+                  const aa = obj["auto_abort"];
+                  if (aa && typeof aa === "object" && !Array.isArray(aa)) {
+                    const a = aa as Record<string, unknown>;
+                    abortPhase = typeof a["phase"] === "string" ? (a["phase"] as string) : null;
+                    abortOk = typeof a["ok"] === "boolean" ? (a["ok"] as boolean) : null;
+                    abortReason = typeof a["reason"] === "string" ? (a["reason"] as string) : null;
+                    abortAtMs = typeof obj["ts_ms"] === "number" ? (obj["ts_ms"] as number) : null;
+                    break;
+                  }
+                } catch {
+                  /* parse error — skip line */
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+
+          // S3 finding (severity high+) 가 cachedReport 에 있는지
+          const s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }> = [];
+          const reportObj =
+            cachedReport && typeof cachedReport === "object"
+              ? (cachedReport as Record<string, unknown>)
+              : {};
+          const rawFindings = reportObj["findings"];
+          const findings = Array.isArray(rawFindings)
+            ? (rawFindings as Array<Record<string, unknown>>)
+            : [];
+          for (const f of findings) {
+            const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
+            const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
+            if (!ruleId.startsWith("s3-")) continue;
+            const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
+            if (rank >= 3) {
+              s3HighFindings.push({
+                ruleId,
+                severity,
+                title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
+              });
+            }
+          }
+
+          // verdict 산출
+          let verdict: "pass" | "blocked" | "fail" | "pending";
+          if (s3HighFindings.length === 0) {
+            verdict = "pass"; // 또는 시나리오 미실행 → pending. 별도 상위 조건으로 처리.
+          } else if (abortPhase === "result" && abortOk === true) {
+            verdict = "blocked";
+          } else {
+            // finding 발화는 됐는데 abort가 result(ok=true)가 아님 → FAIL
+            verdict = "fail";
+          }
+
+          sendJson(res, 200, {
+            ok: true,
+            verdict,
+            s3HighFindings,
+            autoAbort: {
+              phase: abortPhase,
+              ok: abortOk,
+              reason: abortReason,
+              atMs: abortAtMs,
+            },
+          });
           return;
         }
 

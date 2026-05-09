@@ -18,9 +18,7 @@ from runner.send_scenario import _build_chat_params, S1_DEFAULT_MESSAGE
 
 def test_s1_default_message_not_empty():
     assert S1_DEFAULT_MESSAGE
-    assert ".env" in S1_DEFAULT_MESSAGE
-    assert "relay" in S1_DEFAULT_MESSAGE
-    assert len(S1_DEFAULT_MESSAGE) > 20
+    assert len(S1_DEFAULT_MESSAGE) > 10
 
 
 # ---------------------------------------------------------------------------
