@@ -20,7 +20,7 @@ type MessageToolFlowProps = {
   onChatSent?: () => void;
 };
 
-type ToolLine = {
+export type ToolLine = {
   id: string;
   name: string;
   meta: string;
@@ -606,6 +606,23 @@ function embeddedToolLines(e: TimelineEntry, p: Record<string, unknown> | undefi
   return lines;
 }
 
+/**
+ * 시나리오「실행 흐름」·타임라인 보강용: `session.tool`이 result를 빼 둔 경우에도
+ * `agent` 스트림·assistant `parts`에 임베드된 tool_result를 수집한다.
+ */
+export function extractEmbeddedToolLinesForViz(e: TimelineEntry): ToolLine[] {
+  const p = payloadOf(e);
+  if (!p) return [];
+  if (e.kind === "other") {
+    return hasEmbeddedToolSignals(p) ? embeddedToolLines(e, p) : [];
+  }
+  if (e.kind === "session.message" || e.kind === "chat") {
+    if (isUserRole(roleOf(p, e.kind))) return [];
+    return embeddedToolLines(e, p);
+  }
+  return [];
+}
+
 const USER_MSG_DEDUP_MS = 12_000;
 
 /** 말풍선 옆 상태: 출력이 있으면 비움(본문은 출력 블록), 실행 중만 짧게 */
@@ -969,9 +986,8 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [mode, setMode] = useState<ChatMode>("gateway");
-  const [bridgeUrl, setBridgeUrl] = useState("http://localhost:8000");
-  const [bridgeReply, setBridgeReply] = useState<{ question: string; answer: string } | null>(null);
+  const [mode] = useState<ChatMode>("gateway");
+  const [bridgeUrl] = useState("http://localhost:8000");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -992,7 +1008,7 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
         setHint(`오류: ${j.error}`);
       } else {
         const answer = j.response?.trim() || "(에이전트가 이 세션에서 텍스트 응답을 반환하지 않았습니다)";
-        setBridgeReply({ question: msg, answer });
+        void answer; // bridge reply displayed in ChatPanel (StageS2DataLeakage)
         setText("");
         inputRef.current?.focus();
       }
@@ -1066,7 +1082,6 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
     if (!msg || sending) return;
     setSending(true);
     setHint(null);
-    if (mode === "bridge") setBridgeReply(null);
     try {
       if (mode === "bridge") {
         await sendViaBridge(msg);

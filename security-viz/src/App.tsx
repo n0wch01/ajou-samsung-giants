@@ -4,7 +4,7 @@ import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
-import { StageSentinel } from "./panels/StageSentinel";
+import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
 import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
@@ -132,9 +132,6 @@ export function App() {
               connState={gw.connState}
               error={gw.error}
             />
-            <div className="app-sidebar-sentinel">
-              <StageSentinel wsUrl={wsUrl} token={token} sessionKey={sessionKey} connState={gw.connState} />
-            </div>
           </div>
         </aside>
         <main className="app-main">
@@ -151,6 +148,9 @@ export function App() {
 
           <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
+            <div className="s2-panel-section">
+              <StageS2DataLeakage />
+            </div>
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
