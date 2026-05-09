@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { publicAsset } from "../lib/publicAsset";
+import { normalizeUserChatDisplay } from "../lib/userChatDisplay";
 import { sendScenarioThroughDevServer } from "../gateway/scenarioSend";
 import { type GwFrame } from "../gateway/protocol";
 import { apiPath } from "../lib/publicAsset";
@@ -56,23 +57,6 @@ function nestedMessageObj(p: Record<string, unknown> | undefined): Record<string
   const m = p.message;
   if (m && typeof m === "object" && !Array.isArray(m)) return m as Record<string, unknown>;
   return undefined;
-}
-
-/** 채팅 말풍선용: 게이트웨이가 덧붙인 Sender 메타·코드 펜스·선행 `[날짜]` 접두 제거 */
-function stripUserBubbleDecorations(raw: string): string {
-  let s = raw.replace(/\r\n/g, "\n");
-  s = s.replace(
-    /^Sender\s*\(untrusted metadata\):\s*(?:\n\s*)?```(?:json)?\s*\n[\s\S]*?```\s*/im,
-    "",
-  );
-  s = s.replace(/^Sender\s*\(untrusted metadata\):\s*\{[\s\S]*?\}\s*/im, "");
-  s = s.trim();
-  for (let i = 0; i < 4; i++) {
-    const next = s.replace(/^\[[^\]]+\]\s*/, "").trim();
-    if (next === s) break;
-    s = next;
-  }
-  return s.trim();
 }
 
 function messageText(p: Record<string, unknown> | undefined): string {
@@ -779,7 +763,7 @@ function buildChatTurns(entries: TimelineEntry[]): {
     if (e.kind === "chat" || e.kind === "session.message") {
       if (isUserRole(role)) {
         const rawUserText = text.trim();
-        const clean = stripUserBubbleDecorations(rawUserText) || "(내용 없음)";
+        const clean = normalizeUserChatDisplay(rawUserText) || "(내용 없음)";
         const meta = userSourceBadge(p, rawUserText);
         /* messages + session 이중 구독 등으로 동일 사용자 프레임이 두 번 올 때 */
         if (
@@ -883,10 +867,21 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   if (props.connState !== "ready") {
     return (
       <section className="kakao-room kakao-room-empty">
-        <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
-        <p className="kakao-room-hint">
-          OpenClaw에서 쓰는 것과 <strong>같은 세션 키</strong>로 연결하면, 여기 채팅방에 내 메시지·답변·그때 호출된 도구가 보입니다.
-        </p>
+        <div className="chat-empty-state">
+          <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
+          <h3 className="chat-empty-title">Gateway Not Connected</h3>
+          <p className="chat-empty-desc">
+            왼쪽 패널에서 WebSocket URL과 토큰을 입력한 뒤<br />
+            <strong>Connect</strong>를 눌러 OpenClaw Gateway에 연결하세요.
+          </p>
+          <div className="chat-empty-steps">
+            <div className="chat-empty-step"><span className="chat-empty-step-num">1</span>WebSocket URL 입력</div>
+            <div className="chat-empty-step-arrow">→</div>
+            <div className="chat-empty-step"><span className="chat-empty-step-num">2</span>세션 키 · 토큰 입력</div>
+            <div className="chat-empty-step-arrow">→</div>
+            <div className="chat-empty-step"><span className="chat-empty-step-num">3</span>Connect 클릭</div>
+          </div>
+        </div>
       </section>
     );
   }
@@ -902,7 +897,19 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
       </div>
       <div className="kakao-room-scroll" ref={scrollRef}>
         {empty ? (
-          <p className="kakao-room-wait">이 세션에서 메시지를 내면 여기에 표시됩니다.</p>
+          <div className="chat-empty-state chat-empty-state-inline">
+            <img src={publicAsset("chito.png")} alt="chito" className="kakao-empty-illust" />
+            <h3 className="chat-empty-title">No session activity yet</h3>
+            <p className="chat-empty-desc">
+              테스트 프롬프트를 입력하면 Agent 응답과<br />보안 이벤트가 이곳에 실시간으로 표시됩니다.
+            </p>
+            <ul className="chat-empty-list">
+              <li><span className="chat-empty-badge badge-blue">Agent</span>Agent Message &amp; Response</li>
+              <li><span className="chat-empty-badge badge-purple">Tool</span>Tool Invocation</li>
+              <li><span className="chat-empty-badge badge-orange">Policy</span>Policy Violation</li>
+              <li><span className="chat-empty-badge badge-red">Alert</span>Sentinel Alert</li>
+            </ul>
+          </div>
         ) : null}
 
         {orphanAssistantChunks.length > 0 ? (

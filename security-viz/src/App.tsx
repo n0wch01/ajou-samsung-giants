@@ -70,11 +70,11 @@ export function App() {
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
-          <div className="app-header-chito-wrap">
-            <img src={publicAsset("sgclaw_nobg.png")} alt="sgclaw" className="app-header-chito" />
-          </div>
           <div className="app-header-title-tabs">
-            <h1 className="app-header-title">SG-ClawWatch</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <img src={publicAsset("chito.png")} alt="chito" className="kakao-room-avatar" style={{ width: 34, height: 34 }} />
+              <h1 className="app-header-title">SG-AgentSentinel</h1>
+            </div>
             <nav className="app-tabs" role="tablist" aria-label="주요 영역">
               <button
                 type="button"
@@ -92,7 +92,7 @@ export function App() {
                 className={tab === "scenario" ? "app-tab active" : "app-tab"}
                 onClick={() => setTab("scenario")}
               >
-                시나리오
+                시나리오 실행
               </button>
               <button
                 type="button"
@@ -101,7 +101,7 @@ export function App() {
                 className={tab === "policy" ? "app-tab active" : "app-tab"}
                 onClick={() => setTab("policy")}
               >
-                정책
+                정책 검사
               </button>
               <button
                 type="button"
