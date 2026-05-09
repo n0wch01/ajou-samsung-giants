@@ -467,44 +467,6 @@ export function StageScenario(props: StageScenarioProps) {
                 </div>
               )}
               {s.id === "S3" && (
-                <div className="scenario-s3-guardrail row" style={{ marginTop: 8, alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  <span style={{ fontSize: 12, opacity: 0.75 }}>Guardrail:</span>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 600,
-                      padding: "2px 8px",
-                      borderRadius: 4,
-                      border: "1px solid",
-                      color:
-                        s3GuardrailEnabled === null
-                          ? "#888"
-                          : s3GuardrailEnabled
-                            ? "#4ade80"
-                            : "#fb923c",
-                    }}
-                  >
-                    {s3GuardrailEnabled === null
-                      ? "확인 중…"
-                      : s3GuardrailEnabled
-                        ? "ON (auto-abort)"
-                        : "OFF (Direct)"}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={toggleS3Guardrail}
-                    disabled={s3GuardrailEnabled === null || s3GuardrailToggling}
-                    style={{ fontSize: 12 }}
-                  >
-                    {s3GuardrailToggling
-                      ? "전환 중…"
-                      : s3GuardrailEnabled
-                        ? "Guardrail OFF로 전환 (Direct/FAIL 시연)"
-                        : "Guardrail ON으로 전환 (BLOCKED 시연)"}
-                  </button>
-                </div>
-              )}
-              {s.id === "S3" && (
                 <details className="scenario-s1-playbook">
                   <summary>S3 운영 체크리스트</summary>
                   <ol className="scenario-s1-playbook-list">
