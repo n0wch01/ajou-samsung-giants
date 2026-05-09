@@ -82,7 +82,7 @@ export function buildConnectReq(params: {
         mode: params.clientMode ?? CONTROL_UI_MODE,
       },
       role: "operator",
-      scopes: params.scopes ?? ["operator.read", "operator.write"],
+      scopes: params.scopes ?? ["operator.admin", "operator.read", "operator.write"],
       caps: [],
       commands: [],
       permissions: {},

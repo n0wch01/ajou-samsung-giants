@@ -349,7 +349,7 @@ export function sentinelControlPlugin(): Plugin {
 
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
-        if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario")) {
+        if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario") && !url.startsWith("/api/policy")) {
           next();
           return;
         }
@@ -738,6 +738,48 @@ export function sentinelControlPlugin(): Plugin {
               stderrTail: (err.stderr ?? "").toString().slice(-2000),
               stdoutHead: out.slice(0, 400),
             });
+          }
+          return;
+        }
+
+        if ((url === "/api/policy/config-get" || url === "/api/policy/catalog") && req.method === "GET") {
+          const wsUrl = String(new URL(req.url ?? "", "http://localhost").searchParams.get("wsUrl") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_WS_URL ?? "").trim();
+          const token = String(new URL(req.url ?? "", "http://localhost").searchParams.get("token") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_TOKEN ?? "").trim();
+          if (!wsUrl || !token) {
+            sendJson(res, 400, { ok: false, message: "wsUrl, token이 필요합니다. (쿼리 파라미터 또는 환경 변수)" });
+            return;
+          }
+          const method = url === "/api/policy/config-get" ? "config.get" : "tools.catalog";
+          const queryPy = path.join(REPO_ROOT, "scripts", "runner", "policy_query.py");
+          if (!fs.existsSync(queryPy)) {
+            sendJson(res, 500, { ok: false, message: `policy_query.py not found: ${queryPy}` });
+            return;
+          }
+          try {
+            const { stdout, stderr } = await runPythonInWsl(queryPy, [], {
+              env: {
+                ...process.env,
+                PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+                PYTHONUTF8: "1",
+                OPENCLAW_GATEWAY_WS_URL: wsUrl,
+                OPENCLAW_GATEWAY_TOKEN: token,
+                POLICY_METHOD: method,
+              },
+              maxBuffer: 4 * 1024 * 1024,
+              timeout: 20_000,
+            });
+            const text = String(stdout ?? "").trim();
+            const parsed = text ? (JSON.parse(text) as { ok?: boolean; payload?: unknown; message?: string }) : null;
+            if (!parsed?.ok) {
+              const errMsg = parsed?.message ?? String(stderr ?? "").slice(0, 300) ?? "정책 조회 실패";
+              sendJson(res, 200, { ok: false, message: errMsg });
+            } else {
+              sendJson(res, 200, { ok: true, payload: parsed.payload });
+            }
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
           }
           return;
         }

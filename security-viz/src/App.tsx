@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { publicAsset } from "./lib/publicAsset";
+import { publicAsset, apiPath } from "./lib/publicAsset";
 import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
@@ -31,7 +31,8 @@ export function App() {
   const [catalogPayload, setCatalogPayload] = useState<unknown>(undefined);
   const [configError, setConfigError] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [policyBusy, setPolicyBusy] = useState(false);
+  const [configBusy, setConfigBusy] = useState(false);
+  const [catalogBusy, setCatalogBusy] = useState(false);
 
   const onConnect = useCallback(() => {
     localStorage.setItem("sg.viz.wsUrl", wsUrl);
@@ -41,30 +42,40 @@ export function App() {
   }, [gw, sessionKey, token, wsUrl]);
 
   const onRefreshConfig = useCallback(async () => {
-    setPolicyBusy(true);
+    setConfigBusy(true);
     setConfigError(null);
     try {
-      const res = await gw.sendReadonly("config.get", {});
-      setConfigPayload(res);
+      const ws = wsUrl.trim();
+      const tok = token.trim();
+      const url = apiPath(`/api/policy/config-get?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}`);
+      const res = await fetch(url);
+      const j = (await res.json()) as { ok?: boolean; payload?: unknown; message?: string };
+      if (!j.ok) throw new Error(j.message ?? "config.get 실패");
+      setConfigPayload(j.payload);
     } catch (e) {
       setConfigError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPolicyBusy(false);
+      setConfigBusy(false);
     }
-  }, [gw]);
+  }, [wsUrl, token]);
 
   const onRefreshCatalog = useCallback(async () => {
-    setPolicyBusy(true);
+    setCatalogBusy(true);
     setCatalogError(null);
     try {
-      const res = await gw.sendReadonly("tools.catalog", { includePlugins: true });
-      setCatalogPayload(res);
+      const ws = wsUrl.trim();
+      const tok = token.trim();
+      const url = apiPath(`/api/policy/catalog?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}`);
+      const res = await fetch(url);
+      const j = (await res.json()) as { ok?: boolean; payload?: unknown; message?: string };
+      if (!j.ok) throw new Error(j.message ?? "tools.catalog 실패");
+      setCatalogPayload(j.payload);
     } catch (e) {
       setCatalogError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPolicyBusy(false);
+      setCatalogBusy(false);
     }
-  }, [gw]);
+  }, [wsUrl, token]);
 
   return (
     <div className="app-shell">
@@ -157,7 +168,8 @@ export function App() {
               catalogError={catalogError}
               onRefreshConfig={() => void onRefreshConfig()}
               onRefreshCatalog={() => void onRefreshCatalog()}
-              busy={policyBusy}
+              configBusy={configBusy}
+              catalogBusy={catalogBusy}
             />
           </section>
 

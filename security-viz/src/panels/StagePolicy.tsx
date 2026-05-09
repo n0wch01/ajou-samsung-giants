@@ -226,7 +226,8 @@ export type StagePolicyProps = {
   catalogError: string | null;
   onRefreshConfig: () => void;
   onRefreshCatalog: () => void;
-  busy: boolean;
+  configBusy: boolean;
+  catalogBusy: boolean;
 };
 
 export function StagePolicy(props: StagePolicyProps) {
@@ -234,6 +235,8 @@ export function StagePolicy(props: StagePolicyProps) {
   const catalog = props.catalogPayload;
   const cfgErr = props.configError;
   const catErr = props.catalogError;
+  const cfgBusy = props.configBusy;
+  const catBusy = props.catalogBusy;
 
   // diff state
   const [diff, setDiff] = useState<DiffResult | null>(null);
@@ -272,11 +275,11 @@ export function StagePolicy(props: StagePolicyProps) {
   const policyStatusClass = configLoaded ? "pl-val-ok" : "pl-val-muted";
   const dangerClass = dangerCount !== null && dangerCount > 0 ? "pl-val-danger" : dangerCount === 0 ? "pl-val-ok" : "pl-val-muted";
 
-  const cfgStatus = props.busy ? "확인 중..." : cfgErr ? "오류" : cfg !== undefined ? "완료" : "미확인";
-  const cfgChipClass = props.busy ? "pl-chip-checking" : cfgErr ? "pl-chip-danger" : cfg !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+  const cfgStatus = cfgBusy ? "확인 중..." : cfgErr ? "오류" : cfg !== undefined ? "완료" : "미확인";
+  const cfgChipClass = cfgBusy ? "pl-chip-checking" : cfgErr ? "pl-chip-danger" : cfg !== undefined ? "pl-chip-ok" : "pl-chip-muted";
 
-  const catStatus = props.busy ? "확인 중..." : catErr ? "오류" : catalog !== undefined ? "완료" : "미확인";
-  const catChipClass = props.busy ? "pl-chip-checking" : catErr ? "pl-chip-danger" : catalog !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+  const catStatus = catBusy ? "확인 중..." : catErr ? "오류" : catalog !== undefined ? "완료" : "미확인";
+  const catChipClass = catBusy ? "pl-chip-checking" : catErr ? "pl-chip-danger" : catalog !== undefined ? "pl-chip-ok" : "pl-chip-muted";
 
   const diffStatus = diffError ? "오류" : diffLoading ? "비교 중..." : diff !== null ? "완료" : "대기 중";
   const diffChipClass = diffError ? "pl-chip-danger" : diffLoading ? "pl-chip-checking" : diff !== null ? "pl-chip-ok" : "pl-chip-waiting";
@@ -329,10 +332,10 @@ export function StagePolicy(props: StagePolicyProps) {
             <button
               type="button"
               className="sc-btn-primary"
-              disabled={props.busy}
+              disabled={cfgBusy}
               onClick={props.onRefreshConfig}
             >
-              정책 설정 확인
+              {cfgBusy ? "확인 중…" : "정책 설정 확인"}
             </button>
           </div>
           {cfgErr && <p className="pl-check-error">{cfgErr}</p>}
@@ -363,10 +366,10 @@ export function StagePolicy(props: StagePolicyProps) {
             <button
               type="button"
               className="sc-btn-primary"
-              disabled={props.busy}
+              disabled={catBusy}
               onClick={props.onRefreshCatalog}
             >
-              도구 목록 확인
+              {catBusy ? "확인 중…" : "도구 목록 확인"}
             </button>
           </div>
           {catErr && <p className="pl-check-error">{catErr}</p>}
