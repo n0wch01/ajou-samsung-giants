@@ -188,7 +188,7 @@ export function StageScenario(props: StageScenarioProps) {
         return;
       }
 
-      // S3: trace 초기화 + Sentinel 재시작 (abort_state 리셋 + SENTINEL_AUTO_ABORT=1 보장)
+      // S3: trace 초기화 + Sentinel 재시작
       if (entry.id === "S3") {
         setHint("S3: Sentinel 재시작 중 (trace 초기화 + auto-abort 활성화)…");
         try {
@@ -204,7 +204,6 @@ export function StageScenario(props: StageScenarioProps) {
             setHint(`Sentinel 재시작 실패: ${startJ.message ?? "unknown"} — 수동으로 시작 후 재실행하세요.`);
             return;
           }
-          // WS 연결 + 구독이 완료되길 잠시 기다림
           await new Promise<void>((r) => window.setTimeout(r, 2000));
         } catch (e) {
           setHint(`Sentinel 재시작 오류: ${e instanceof Error ? e.message : String(e)}`);
@@ -212,12 +211,10 @@ export function StageScenario(props: StageScenarioProps) {
         }
       }
 
-      // 확인 전(idle/checking)에 실행 누르면 stale 상태로 보내질 수 있어 먼저 tools.catalog 동기화
       let ps: PluginStatus | undefined = pluginStatuses[entry.id];
       if (entry.requiredTools?.length && (!ps || ps.state === "idle" || ps.state === "checking")) {
         ps = await checkPlugin(entry);
       }
-      // 플러그인 미설치 시 자동 설치
       if (entry.requiredTools?.length && ps?.state === "missing") {
         setHint("플러그인 자동 설치 중…");
         setManagingPlugin("install");
@@ -227,15 +224,11 @@ export function StageScenario(props: StageScenarioProps) {
           setHint(`플러그인 설치 실패: ${installResult.message}`);
           return;
         }
-        // 게이트웨이 재시작 후 완전히 뜰 때까지 대기
         setHint("게이트웨이 재시작 대기 중… (4초)");
         await new Promise<void>((r) => window.setTimeout(r, 4000));
         const afterInstall = await checkPlugin(entry);
         if (afterInstall?.state !== "ok") {
-          setHint(
-            "설치·allow 반영·게이트웨이 재시작까지 완료했지만 tools.catalog에 util_* 도구가 아직 없습니다. " +
-              "게이트웨이 연결 상태를 확인한 뒤 「재확인」하고 다시 실행하세요.",
-          );
+          setHint("설치 완료 후 tools.catalog에 도구가 아직 없습니다. 게이트웨이 연결 상태를 확인 후 재확인하세요.");
           return;
         }
         setHint("플러그인 반영 확인됨. 시나리오 실행 중…");
@@ -246,121 +239,67 @@ export function StageScenario(props: StageScenarioProps) {
       abortRef.current = ac;
       setSendingId(entry.id);
       setLastRunScenarioId(entry.id);
-      setHint(`${entry.id} chat.send 전송 중…`);
+      setHint(`${entry.id} 전송 중…`);
       try {
-        const res = await sendScenarioThroughDevServer({
-          wsUrl: ws,
-          token: tok,
-          sessionKey: key,
-          message: body,
-          scenarioId: entry.id,
-          signal: ac.signal,
-        });
-        if (res.ok) {
-          if (entry.id === "S1") {
-            props.onS1RunSuccess?.();
+        if (props.injectFrame) {
+          const res = await fetch(apiPath("/api/scenario/chat-stream"), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: ac.signal,
+            body: JSON.stringify({
+              wsUrl: ws, token: tok, sessionKey: key,
+              message: body, scenarioId: entry.id, resetSession: true,
+            }),
+          });
+          if (!res.ok || !res.body) {
+            const j = await res.json().catch(() => ({})) as { message?: string };
+            setHint(j.message ?? `HTTP ${res.status}`);
+          } else {
+            if (entry.id === "S1") props.onS1RunSuccess?.();
+            setHint(`${entry.id} 전송 완료.`);
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buf = "";
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              buf += decoder.decode(value, { stream: true });
+              const lines = buf.split("\n");
+              buf = lines.pop() ?? "";
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+                try {
+                  const frame = JSON.parse(trimmed) as { type?: string };
+                  if (frame.type === "event") props.injectFrame!(frame as GwFrame);
+                  else if (frame.type === "error") setHint((frame as { message?: string }).message ?? "스트리밍 오류");
+                } catch { /* skip malformed line */ }
+              }
+            }
           }
-          setHint(`${entry.id} 전송 완료.`);
         } else {
-          setHint(res.message);
+          const res = await sendScenarioThroughDevServer({
+            wsUrl: ws, token: tok, sessionKey: key,
+            message: body, scenarioId: entry.id, signal: ac.signal,
+          });
+          if (res.ok) {
+            if (entry.id === "S1") props.onS1RunSuccess?.();
+            setHint(`${entry.id} 전송 완료.`);
+          } else {
+            setHint(res.message ?? "전송 실패");
+          }
         }
       } catch (e) {
-        setHint(e instanceof Error ? e.message : String(e));
+        if ((e as DOMException)?.name !== "AbortError") {
+          setHint(e instanceof Error ? e.message : String(e));
+        }
       } finally {
         setSendingId(null);
         abortRef.current = null;
       }
-    }
-
-    let ps: PluginStatus | undefined = pluginStatuses[entry.id];
-    if (entry.requiredTools?.length && (!ps || ps.state === "idle" || ps.state === "checking")) {
-      ps = await checkPlugin(entry);
-    }
-    if (entry.requiredTools?.length && ps?.state === "missing") {
-      showHint("플러그인 자동 설치 중…", "info");
-      setManagingPlugin("install");
-      const installResult = await managePlugin("install");
-      setManagingPlugin(null);
-      if (!installResult.ok) {
-        showHint(`플러그인 설치 실패: ${installResult.message}`, "err");
-        return;
-      }
-      showHint("게이트웨이 재시작 대기 중… (4초)", "info");
-      await new Promise<void>((r) => window.setTimeout(r, 4000));
-      const afterInstall = await checkPlugin(entry);
-      if (afterInstall?.state !== "ok") {
-        showHint("설치 완료 후 tools.catalog에 도구가 아직 없습니다. 게이트웨이 연결 상태를 확인 후 재확인하세요.", "err");
-        return;
-      }
-      showHint("플러그인 반영 확인됨. 시나리오 실행 중…", "ok");
-    }
-
-    abortRef.current?.abort();
-    const ac = new AbortController();
-    abortRef.current = ac;
-    setSendingId(entry.id);
-    setLastRunScenarioId(entry.id);
-    showHint(`${entry.id} 전송 중…`, "info");
-    try {
-      if (props.injectFrame) {
-        const res = await fetch(apiPath("/api/scenario/chat-stream"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: ac.signal,
-          body: JSON.stringify({
-            wsUrl: ws, token: tok, sessionKey: key,
-            message: body,
-            scenarioId: entry.id,
-            resetSession: true,
-          }),
-        });
-        if (!res.ok || !res.body) {
-          const j = await res.json().catch(() => ({})) as { message?: string };
-          showHint(j.message ?? `HTTP ${res.status}`, "err");
-        } else {
-          if (entry.id === "S1") props.onS1RunSuccess?.();
-          showHint(`${entry.id} 전송 완료.`, "ok");
-          const reader = res.body.getReader();
-          const decoder = new TextDecoder();
-          let buf = "";
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split("\n");
-            buf = lines.pop() ?? "";
-            for (const line of lines) {
-              const trimmed = line.trim();
-              if (!trimmed) continue;
-              try {
-                const frame = JSON.parse(trimmed) as { type?: string };
-                if (frame.type === "event") props.injectFrame!(frame as GwFrame);
-                else if (frame.type === "error") showHint((frame as { message?: string }).message ?? "스트리밍 오류", "err");
-              } catch { /* skip malformed line */ }
-            }
-          }
-        }
-      } else {
-        const res = await sendScenarioThroughDevServer({
-          wsUrl: ws, token: tok, sessionKey: key,
-          message: body, scenarioId: entry.id, signal: ac.signal,
-        });
-        if (res.ok) {
-          if (entry.id === "S1") props.onS1RunSuccess?.();
-          showHint(`${entry.id} 전송 완료.`, "ok");
-        } else {
-          showHint(res.message ?? "전송 실패", "err");
-        }
-      }
-    } catch (e) {
-      if ((e as DOMException)?.name !== "AbortError") {
-        showHint(e instanceof Error ? e.message : String(e), "err");
-      }
-    } finally {
-      setSendingId(null);
-      abortRef.current = null;
-    }
-  }, [props, pluginStatuses, checkPlugin, showHint]);
+    },
+    [props, pluginStatuses, checkPlugin],
+  );
 
   const handlePluginManage = useCallback(async (entry: ScenarioEntry, action: "install" | "uninstall") => {
     setManagingPlugin(action);
