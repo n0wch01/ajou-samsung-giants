@@ -1181,9 +1181,6 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {scenarioId === "S1" && turn?.s1Verdict === "success" && (
           <span className="ft-badge-success">S1 성공</span>
         )}
-        {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
-          <span className="ft-badge-fail">S1 실패</span>
-        )}
         {scenarioId === "S3" && s3 && s3.verdict === "blocked" && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 BLOCKED
@@ -1195,10 +1192,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
           </span>
         )}
         {scenarioId === "S2" && turn?.s2Verdict === "success" && (
-          <span className="ft-badge-success">S2 성공 (데이터 유출)</span>
-        )}
-        {scenarioId === "S2" && turn?.s2Verdict === "fail" && (
-          <span className="ft-badge-fail">S2 실패 (주입 미동작)</span>
+          <span className="ft-badge-success">S2 성공</span>
         )}
       </div>
 
