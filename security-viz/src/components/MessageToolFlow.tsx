@@ -980,14 +980,10 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   );
 }
 
-type ChatMode = "gateway" | "bridge";
-
 function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; injectFrame?: (frame: GwFrame) => void }) {
   const [text, setText] = useState("");
   const [sending, setSending] = useState(false);
   const [hint, setHint] = useState<string | null>(null);
-  const [mode] = useState<ChatMode>("gateway");
-  const [bridgeUrl] = useState("http://localhost:8000");
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -995,27 +991,6 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
     const t = window.setTimeout(() => setHint(null), 5000);
     return () => window.clearTimeout(t);
   }, [hint]);
-
-  const sendViaBridge = useCallback(async (msg: string) => {
-    try {
-      const res = await fetch(`${bridgeUrl.trim().replace(/\/$/, "")}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: msg }),
-      });
-      const j = (await res.json()) as { response?: string; error?: string; returncode?: number };
-      if (j.error && j.returncode !== 0) {
-        setHint(`오류: ${j.error}`);
-      } else {
-        const answer = j.response?.trim() || "(에이전트가 이 세션에서 텍스트 응답을 반환하지 않았습니다)";
-        void answer; // bridge reply displayed in ChatPanel (StageS2DataLeakage)
-        setText("");
-        inputRef.current?.focus();
-      }
-    } catch (e) {
-      setHint(e instanceof Error ? e.message : String(e));
-    }
-  }, [bridgeUrl]);
 
   const sendViaGateway = useCallback(async (msg: string) => {
     if (props.injectFrame) {
@@ -1083,15 +1058,11 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
     setSending(true);
     setHint(null);
     try {
-      if (mode === "bridge") {
-        await sendViaBridge(msg);
-      } else {
-        await sendViaGateway(msg);
-      }
+      await sendViaGateway(msg);
     } finally {
       setSending(false);
     }
-  }, [text, sending, mode, sendViaBridge, sendViaGateway]);
+  }, [text, sending, sendViaGateway]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -1108,7 +1079,7 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
         <textarea
           ref={inputRef}
           className="chat-input-textarea"
-          placeholder={mode === "bridge" ? "직접 OpenClaw에 전송 (Enter 전송)" : "메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"}
+          placeholder="메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"
           value={text}
           rows={1}
           disabled={sending}
