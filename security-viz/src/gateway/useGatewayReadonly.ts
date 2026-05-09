@@ -21,6 +21,10 @@ export type UseGatewayReadonly = {
   disconnect: () => void;
   /** Read-only RPC after hello. */
   sendReadonly: (method: string, params?: unknown) => Promise<unknown>;
+  /** Write-capable RPC (e.g. chat.send) — main connection already has operator.write scope. */
+  sendWritable: (method: string, params?: unknown) => Promise<unknown>;
+  /** Dev server 스트리밍에서 받은 프레임을 타임라인에 직접 주입한다. */
+  injectFrame: (frame: GwFrame) => void;
 };
 
 const MAX_FRAMES = 2500;
@@ -95,6 +99,38 @@ export function useGatewayReadonly(): UseGatewayReadonly {
           pendingRef.current.delete(id);
           reject(new Error(`RPC timeout: ${method}`));
         }, 30_000);
+        pendingRef.current.set(id, (resFrame) => {
+          window.clearTimeout(timer);
+          if (resFrame.type !== "res") {
+            reject(new Error("Invalid response frame"));
+            return;
+          }
+          if (!resFrame.ok) {
+            reject(new Error(resFrame.error?.message ?? resFrame.error?.code ?? "RPC error"));
+            return;
+          }
+          resolve(resFrame.payload);
+        });
+        ws.send(JSON.stringify(req));
+      });
+    },
+    [],
+  );
+
+  const sendWritable = useCallback(
+    (method: string, params?: unknown) => {
+      const id = newReqId();
+      const req: GwFrame = { type: "req", id, method, params };
+      return new Promise<unknown>((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error("WebSocket is not open"));
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          pendingRef.current.delete(id);
+          reject(new Error(`RPC timeout: ${method}`));
+        }, 60_000);
         pendingRef.current.set(id, (resFrame) => {
           window.clearTimeout(timer);
           if (resFrame.type !== "res") {
@@ -282,6 +318,8 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     connect,
     disconnect,
     sendReadonly,
+    sendWritable,
+    injectFrame: appendFrame,
   };
 }
 

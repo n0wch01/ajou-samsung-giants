@@ -48,8 +48,8 @@ export function parseGwFrame(raw: string): GwFrame | null {
 }
 
 /** Matches OpenClaw `GATEWAY_CLIENT_IDS` / `GATEWAY_CLIENT_MODES` (protocol v3). */
-const CONTROL_UI_ID = "openclaw-control-ui";
-const CONTROL_UI_MODE = "ui";
+const CONTROL_UI_ID = "gateway-client";
+const CONTROL_UI_MODE = "backend";
 
 function guessClientPlatform(): string {
   if (typeof navigator === "undefined") return "macos";
@@ -82,7 +82,7 @@ export function buildConnectReq(params: {
         mode: params.clientMode ?? CONTROL_UI_MODE,
       },
       role: "operator",
-      scopes: params.scopes ?? ["operator.read"],
+      scopes: params.scopes ?? ["operator.read", "operator.write"],
       caps: [],
       commands: [],
       permissions: {},

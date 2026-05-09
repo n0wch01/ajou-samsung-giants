@@ -37,6 +37,44 @@ function toWslPath(winPath: string): string {
   return winPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
 }
 
+/** ws://192.168.x.x:PORT → ws://127.0.0.1:PORT (WSL 내부에서 loopback으로 게이트웨이 접근) */
+function toWslWsUrl(wsUrl: string): string {
+  return wsUrl.replace(/^(wss?:\/\/)[^/:]+/, "$1127.0.0.1");
+}
+
+/**
+ * 게이트웨이에 연결하는 Python 스크립트는 WSL에서 실행해야
+ * ~/.openclaw/identity/device.json(Ed25519 서명)으로 operator.write 스코프를 얻을 수 있다.
+ */
+async function runPythonInWsl(
+  scriptPath: string,
+  args: string[],
+  opts: { env?: NodeJS.ProcessEnv; timeout: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  if (process.platform === "win32") {
+    const wslScript = toWslPath(scriptPath);
+    const src = opts.env ?? {};
+    // Windows 환경변수(HOME, PATH 등)를 그대로 넘기면 WSL Python이 잘못된 경로를 참조.
+    // OPENCLAW_* / PYTHONPATH / PYTHONUTF8 등 필요한 키만 선택적으로 전달한다.
+    const wslEnv: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
+    for (const key of Object.keys(src)) {
+      if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "GUARDRAIL_ACTION" || key === "GUARDRAIL_TOOL_NAMES" || key === "CHECK_TOOL_NAMES" || key === "SENTINEL_AUTO_ABORT") {
+        wslEnv[key] = src[key];
+      }
+    }
+    if (wslEnv.OPENCLAW_GATEWAY_WS_URL) {
+      wslEnv.OPENCLAW_GATEWAY_WS_URL = toWslWsUrl(wslEnv.OPENCLAW_GATEWAY_WS_URL);
+    }
+    if (wslEnv.PYTHONPATH) {
+      wslEnv.PYTHONPATH = toWslPath(wslEnv.PYTHONPATH as string);
+    }
+    // WSLENV: WSL이 Linux 프로세스로 전달할 변수 이름을 명시 (없으면 커스텀 변수가 전달 안 됨)
+    wslEnv.WSLENV = Object.keys(wslEnv).join(":");
+    return execFileAsync("wsl", ["python3", wslScript, ...args], { ...opts, env: wslEnv });
+  }
+  return execFileAsync(pickPython(), [scriptPath, ...args], opts);
+}
+
 /**
  * Windows에서 openclaw는 WSL에 설치되어 있어 wsl bash -lc 경유로 실행한다.
  * 로그인 셸(-l)을 써야 ~/.bashrc/.profile의 PATH가 적용된다.
@@ -293,7 +331,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `check_plugin.py를 찾을 수 없습니다: ${checkPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -303,8 +340,7 @@ export function sentinelControlPlugin(): Plugin {
           };
           if (toolNames.length > 0) env.CHECK_TOOL_NAMES = toolNames.join(",");
           try {
-            const { stdout } = await execFileAsync(py, [checkPy], {
-              cwd: REPO_ROOT,
+            const { stdout } = await runPythonInWsl(checkPy, [], {
               env,
               timeout: 20_000,
             });
@@ -343,7 +379,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `toggle_guardrail.py를 찾을 수 없습니다: ${guardrailPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -354,8 +389,7 @@ export function sentinelControlPlugin(): Plugin {
           };
           if (toolNames.length > 0) env.GUARDRAIL_TOOL_NAMES = toolNames.join(",");
           try {
-            const { stdout } = await execFileAsync(py, [guardrailPy], {
-              cwd: REPO_ROOT,
+            const { stdout } = await runPythonInWsl(guardrailPy, [], {
               env,
               timeout: 20_000,
             });
@@ -401,7 +435,7 @@ export function sentinelControlPlugin(): Plugin {
               }
               const installResult = await runOpenclaw(["plugins", "install", "--force", pluginDirArg], {
                 cwd: REPO_ROOT,
-                timeout: 30_000,
+                timeout: 120_000,
               });
 
               const configPath = resolveOpenClawConfigPath();
@@ -487,6 +521,81 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        if (url === "/api/scenario/chat-stream" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const wsUrl = String(body.wsUrl ?? "").trim();
+          const token = String(body.token ?? "").trim();
+          const sessionKey = String(body.sessionKey ?? "").trim();
+          const message = String(body.message ?? "").trim();
+          const scenarioId = String(body.scenarioId ?? "").trim();
+          const resetSession = body.resetSession === true;
+          if (!wsUrl || !token || !sessionKey || !message) {
+            sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
+            return;
+          }
+          // S2: README를 원본에서 WSL workspace로 복원
+          if (scenarioId === "S2") {
+            const srcReadme = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
+            if (fs.existsSync(srcReadme)) {
+              try {
+                const srcWsl = toWslPath(srcReadme);
+                const wslDest = path.join(
+                  os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
+                  ".openclaw", "workspace", "mock-targets", "readme_s2.md"
+                );
+                await execFileAsync("wsl", ["bash", "-c", `mkdir -p "$(dirname '${wslDest}')" && cp '${srcWsl}' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
+              } catch { /* silent */ }
+            }
+          }
+          const streamPy = path.join(REPO_ROOT, "scripts", "runner", "chat_stream.py");
+          if (!fs.existsSync(streamPy)) {
+            sendJson(res, 500, { ok: false, message: `chat_stream.py를 찾을 수 없습니다: ${streamPy}` });
+            return;
+          }
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
+            OPENCLAW_GATEWAY_WS_URL: wsUrl,
+            OPENCLAW_GATEWAY_TOKEN: token,
+            OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
+            OPENCLAW_SCENARIO_MESSAGE: message,
+          };
+          if (resetSession) env.OPENCLAW_RESET_SESSION_FIRST = "1";
+          // WSLENV: Windows → WSL 환경 변수 전달 필수
+          const wslEnvKeys: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
+          for (const key of Object.keys(env)) {
+            if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "CHAT_STREAM_TIMEOUT_S") {
+              wslEnvKeys[key] = env[key];
+            }
+          }
+          if (wslEnvKeys.OPENCLAW_GATEWAY_WS_URL) wslEnvKeys.OPENCLAW_GATEWAY_WS_URL = toWslWsUrl(wslEnvKeys.OPENCLAW_GATEWAY_WS_URL as string);
+          if (wslEnvKeys.PYTHONPATH) wslEnvKeys.PYTHONPATH = toWslPath(wslEnvKeys.PYTHONPATH as string);
+          wslEnvKeys.WSLENV = Object.keys(wslEnvKeys).join(":");
+          const wslScript = toWslPath(streamPy);
+          const args = process.platform === "win32"
+            ? ["wsl", ["python3", wslScript]]
+            : [pickPython(), [streamPy]] as [string, string[]];
+          const proc = spawn(args[0] as string, args[1] as string[], {
+            env: process.platform === "win32" ? wslEnvKeys : env,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("X-Accel-Buffering", "no");
+          proc.stdout?.on("data", (chunk: Buffer) => {
+            try { res.write(chunk); } catch { /* client disconnected */ }
+          });
+          proc.stderr?.on("data", (chunk: Buffer) => {
+            // stderr 는 버리되 디버그 로깅용 (Vite 콘솔에만)
+            process.stderr.write(chunk);
+          });
+          proc.on("close", () => { try { res.end(); } catch { /* ignore */ } });
+          req.on("close", () => { try { proc.kill("SIGTERM"); } catch { /* ignore */ } });
+          return;
+        }
+
         if (url === "/api/scenario/send" && req.method === "POST") {
           const body = await readJsonBody(req);
           const wsUrl = String(body.wsUrl ?? "").trim();
@@ -520,7 +629,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `send_scenario.py not found: ${sendPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -528,7 +636,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
-            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.admin,operator.write,operator.read",
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
             OPENCLAW_SCENARIO_MESSAGE: message,
             // S1/S2/S3 모두 이전 맥락 없이 fresh start
             OPENCLAW_RESET_SESSION_FIRST: (scenarioId === "S1" || scenarioId === "S2" || scenarioId === "S3") ? "1" : "0",
@@ -537,8 +645,7 @@ export function sentinelControlPlugin(): Plugin {
             env.OPENCLAW_CHAT_METHOD = chatMethod;
           }
           try {
-            const { stdout, stderr } = await execFileAsync(py, [sendPy, "--scenario", scenarioId], {
-              cwd: REPO_ROOT,
+            const { stdout, stderr } = await runPythonInWsl(sendPy, ["--scenario", scenarioId], {
               env,
               maxBuffer: 24 * 1024 * 1024,
               timeout: 120_000,
@@ -750,7 +857,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
-            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.admin,operator.write,operator.read",
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
             SENTINEL_AUTO_ABORT: "1",
           };
           try {
@@ -861,7 +968,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `abort.py not found: ${abortPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -871,8 +977,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
           };
           try {
-            const { stdout, stderr } = await execFileAsync(py, [abortPy], {
-              cwd: REPO_ROOT,
+            const { stdout, stderr } = await runPythonInWsl(abortPy, [], {
               env,
               maxBuffer: 4 * 1024 * 1024,
               timeout: 30_000,

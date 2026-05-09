@@ -145,11 +145,12 @@ export function App() {
               wsUrl={wsUrl}
               token={token}
               sessionKey={sessionKey}
+              injectFrame={gw.injectFrame}
             />
           </section>
 
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
+          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
+            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
