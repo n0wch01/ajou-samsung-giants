@@ -206,7 +206,7 @@ function ConfigView({ data }: { data: unknown }) {
   );
 }
 
-// ── tools.effective diff ──────────────────────────────────────────────────
+// ── tools.effective diff 타입 ─────────────────────────────────────────────
 
 type DiffResult = {
   baseline: string[];
@@ -216,70 +216,6 @@ type DiffResult = {
   baselinePath: string;
   tracePath: string;
 };
-
-function ToolsDiffSection() {
-  const [diff, setDiff] = useState<DiffResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(apiPath("/api/sentinel/tools-diff"));
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = (await res.json()) as DiffResult & { ok?: boolean };
-      setDiff(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setDiff(null);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  return (
-    <div style={{ marginTop: 20 }}>
-      <h3>tools.effective — 베이스라인 diff</h3>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <button type="button" disabled={loading} onClick={() => void load()}>
-          {loading ? "비교 중..." : "베이스라인 diff 실행"}
-        </button>
-      </div>
-      {error ? <p className="muted" style={{ color: "var(--warn)" }}>{error}</p> : null}
-      {diff ? (
-        <div className="stack" style={{ gap: 10 }}>
-          <p className="muted" style={{ fontSize: "0.75rem" }}>
-            baseline {diff.baseline.length}개 / current {diff.current.length}개
-          </p>
-          {diff.added.length === 0 && diff.removed.length === 0 ? (
-            <p className="muted">차이 없음 — 현재 tools.effective가 베이스라인과 일치합니다.</p>
-          ) : null}
-          {diff.added.length > 0 ? (
-            <div>
-              <strong style={{ color: "var(--warn)" }}>추가된 도구 ({diff.added.length})</strong>
-              <div className="diff-chip-row">
-                {diff.added.map((n) => (
-                  <code key={n} className="diff-chip diff-chip-added">{n}</code>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {diff.removed.length > 0 ? (
-            <div>
-              <strong style={{ color: "var(--muted)" }}>제거된 도구 ({diff.removed.length})</strong>
-              <div className="diff-chip-row">
-                {diff.removed.map((n) => (
-                  <code key={n} className="diff-chip diff-chip-removed">{n}</code>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
 
@@ -299,49 +235,274 @@ export function StagePolicy(props: StagePolicyProps) {
   const cfgErr = props.configError;
   const catErr = props.catalogError;
 
+  // diff state
+  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+
+  // detail expanded
+  const [cfgExpanded, setCfgExpanded] = useState(false);
+  const [catExpanded, setCatExpanded] = useState(false);
+  const [diffExpanded, setDiffExpanded] = useState(false);
+
+  const loadDiff = useCallback(async () => {
+    setDiffLoading(true);
+    setDiffError(null);
+    try {
+      const res = await fetch(apiPath("/api/sentinel/tools-diff"));
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = (await res.json()) as DiffResult & { ok?: boolean };
+      setDiff(data);
+    } catch (e) {
+      setDiffError(e instanceof Error ? e.message : String(e));
+      setDiff(null);
+    } finally {
+      setDiffLoading(false);
+    }
+  }, []);
+
+  // ── 상태 계산 ──────────────────────────────────────────────────────────
+
+  const configLoaded = cfg !== undefined && !cfgErr;
+  const catalogLoaded = catalog !== undefined && !catErr;
+  const toolCount = catalogLoaded ? extractGroups(catalog).reduce((s, g) => s + g.tools.length, 0) : null;
+  const dangerCount = diff ? diff.added.length + diff.removed.length : null;
+
+  const policyStatus = configLoaded ? "정상" : "미확인";
+  const policyStatusClass = configLoaded ? "pl-val-ok" : "pl-val-muted";
+  const dangerClass = dangerCount !== null && dangerCount > 0 ? "pl-val-danger" : dangerCount === 0 ? "pl-val-ok" : "pl-val-muted";
+
+  const cfgStatus = props.busy ? "확인 중..." : cfgErr ? "오류" : cfg !== undefined ? "완료" : "미확인";
+  const cfgChipClass = props.busy ? "pl-chip-checking" : cfgErr ? "pl-chip-danger" : cfg !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+
+  const catStatus = props.busy ? "확인 중..." : catErr ? "오류" : catalog !== undefined ? "완료" : "미확인";
+  const catChipClass = props.busy ? "pl-chip-checking" : catErr ? "pl-chip-danger" : catalog !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+
+  const diffStatus = diffError ? "오류" : diffLoading ? "비교 중..." : diff !== null ? "완료" : "대기 중";
+  const diffChipClass = diffError ? "pl-chip-danger" : diffLoading ? "pl-chip-checking" : diff !== null ? "pl-chip-ok" : "pl-chip-waiting";
+
+  const anyResult = configLoaded || catalogLoaded || diff !== null || cfgErr || catErr || diffError;
+
   return (
-    <div className="panel">
-      <h2>정책 검사</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <button type="button" disabled={props.busy} onClick={props.onRefreshConfig}>
-          config.get 새로고침
-        </button>
-        <button type="button" disabled={props.busy} onClick={props.onRefreshCatalog}>
-          tools.catalog 새로고침
-        </button>
+    <div className="sc-page">
+
+      {/* ── 페이지 헤더 ── */}
+      <div className="sc-page-header">
+        <div className="sc-page-title-wrap">
+          <h2 className="sc-page-title">정책 검사</h2>
+          <p className="sc-page-desc">OpenClaw의 정책 설정과 도구 목록을 기준 상태와 비교하여 위험 변경 사항을 탐지합니다.</p>
+        </div>
+        <div className="sc-status-bar">
+          <div className="sc-status-item">
+            <span className="sc-status-label">정책 상태</span>
+            <span className={`sc-status-value ${policyStatusClass}`}>{policyStatus}</span>
+          </div>
+          <div className="sc-status-divider" />
+          <div className="sc-status-item">
+            <span className="sc-status-label">등록 도구</span>
+            <span className="sc-status-value">{toolCount !== null ? toolCount : "—"}</span>
+          </div>
+          <div className="sc-status-divider" />
+          <div className="sc-status-item">
+            <span className="sc-status-label">위험 변경</span>
+            <span className={`sc-status-value ${dangerClass}`}>
+              {dangerCount !== null ? dangerCount : "—"}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <details className="policy-section" open>
-        <summary className="policy-section-summary">
-          config.get
-          {cfg !== undefined
-            ? <span className="policy-section-badge ok">로드됨</span>
-            : <span className="policy-section-badge empty">없음</span>}
-        </summary>
-        {cfgErr
-          ? <p className="policy-fetch-error">오류: {cfgErr}</p>
-          : cfg === undefined
-            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-            : <ConfigView data={cfg} />}
-      </details>
+      {/* ── 검사 항목 ── */}
+      <h3 className="pl-section-title">검사 항목</h3>
+      <div className="pl-check-list">
 
-      <details className="policy-section">
-        <summary className="policy-section-summary">
-          tools.catalog
-          {catalog !== undefined
-            ? <span className="policy-section-badge ok">
-                {extractGroups(catalog).reduce((s, g) => s + g.tools.length, 0)}개 도구
-              </span>
-            : <span className="policy-section-badge empty">없음</span>}
-        </summary>
-        {catErr
-          ? <p className="policy-fetch-error">오류: {catErr}</p>
-          : catalog === undefined
-            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-            : <ToolsCatalogView data={catalog} />}
-      </details>
+        {/* 카드 1: 정책 설정 검사 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">01</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">정책 설정 검사</span>
+              <code className="pl-check-method">config.get</code>
+              <span className="pl-check-desc">현재 OpenClaw의 보안 설정을 불러옵니다.</span>
+            </div>
+            <span className={`pl-chip ${cfgChipClass}`}>{cfgStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={props.busy}
+              onClick={props.onRefreshConfig}
+            >
+              정책 설정 확인
+            </button>
+          </div>
+          {cfgErr && <p className="pl-check-error">{cfgErr}</p>}
+          {cfg !== undefined && !cfgErr && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setCfgExpanded((v) => !v)}
+              >
+                {cfgExpanded ? "▲ 상세 접기" : "▼ 상세 보기"}
+              </button>
+              {cfgExpanded && <ConfigView data={cfg} />}
+            </div>
+          )}
+        </div>
 
-      <ToolsDiffSection />
+        {/* 카드 2: 도구 목록 검사 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">02</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">도구 목록 검사</span>
+              <code className="pl-check-method">tools.catalog</code>
+              <span className="pl-check-desc">현재 등록된 도구 목록을 확인합니다.</span>
+            </div>
+            <span className={`pl-chip ${catChipClass}`}>{catStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={props.busy}
+              onClick={props.onRefreshCatalog}
+            >
+              도구 목록 확인
+            </button>
+          </div>
+          {catErr && <p className="pl-check-error">{catErr}</p>}
+          {catalog !== undefined && !catErr && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setCatExpanded((v) => !v)}
+              >
+                {catExpanded ? "▲ 상세 접기" : "▼ 상세 보기"}
+              </button>
+              {catExpanded && <ToolsCatalogView data={catalog} />}
+            </div>
+          )}
+        </div>
+
+        {/* 카드 3: 기준 도구 목록 비교 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">03</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">기준 도구 목록 비교</span>
+              <code className="pl-check-method">tools.effective baseline diff</code>
+              <span className="pl-check-desc">현재 도구 목록과 기준 상태를 비교합니다.</span>
+            </div>
+            <span className={`pl-chip ${diffChipClass}`}>{diffStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={diffLoading}
+              onClick={() => void loadDiff()}
+            >
+              변경 사항 검사
+            </button>
+          </div>
+          {diffError && <p className="pl-check-error">{diffError}</p>}
+          {diff !== null && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setDiffExpanded((v) => !v)}
+              >
+                {diffExpanded ? "▲ 결과 접기" : "▼ 결과 보기"}
+              </button>
+              {diffExpanded && (
+                <div className="pl-diff-result">
+                  <p className="pl-diff-summary">
+                    baseline {diff.baseline.length}개 / current {diff.current.length}개
+                  </p>
+                  {diff.added.length === 0 && diff.removed.length === 0 ? (
+                    <p className="pl-diff-clean">차이 없음 — 현재 tools.effective가 베이스라인과 일치합니다.</p>
+                  ) : null}
+                  {diff.added.length > 0 && (
+                    <div className="pl-diff-section">
+                      <span className="pl-diff-label pl-diff-added">추가된 도구 ({diff.added.length})</span>
+                      <div className="diff-chip-row">
+                        {diff.added.map((n) => (
+                          <code key={n} className="diff-chip diff-chip-added">{n}</code>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {diff.removed.length > 0 && (
+                    <div className="pl-diff-section">
+                      <span className="pl-diff-label pl-diff-removed">제거된 도구 ({diff.removed.length})</span>
+                      <div className="diff-chip-row">
+                        {diff.removed.map((n) => (
+                          <code key={n} className="diff-chip diff-chip-removed">{n}</code>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+      </div>
+
+      {/* ── 검사 결과 ── */}
+      <h3 className="pl-section-title" style={{ marginTop: 24 }}>검사 결과</h3>
+      {!anyResult ? (
+        <div className="pl-results-empty">
+          <span className="pl-results-empty-icon">◎</span>
+          <p>아직 실행된 검사가 없습니다.</p>
+        </div>
+      ) : (
+        <div className="pl-results-content">
+          {configLoaded && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>정책 설정 로드 완료</span>
+            </div>
+          )}
+          {cfgErr && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">✗</span>
+              <span>정책 설정 오류 — {cfgErr}</span>
+            </div>
+          )}
+          {catalogLoaded && toolCount !== null && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>도구 목록 로드 완료 — {toolCount}개 도구 등록됨</span>
+            </div>
+          )}
+          {catErr && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">✗</span>
+              <span>도구 목록 오류 — {catErr}</span>
+            </div>
+          )}
+          {diff !== null && diff.added.length === 0 && diff.removed.length === 0 && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>베이스라인 일치 — 위험 변경 없음</span>
+            </div>
+          )}
+          {diff !== null && (diff.added.length > 0 || diff.removed.length > 0) && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">!</span>
+              <span>위험 변경 감지 — {diff.added.length}개 추가, {diff.removed.length}개 제거</span>
+            </div>
+          )}
+          {diffError && (
+            <div className="pl-result-row pl-result-warn">
+              <span className="pl-result-icon">!</span>
+              <span>비교 오류 — {diffError}</span>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }
