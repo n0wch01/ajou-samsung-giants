@@ -22,10 +22,12 @@ import argparse
 import asyncio
 import json
 import os
+import shutil
 import sys
 from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = SCRIPTS_DIR.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
@@ -53,6 +55,21 @@ DEFAULT_MESSAGE_BY_SCENARIO: dict[str, str] = {
 
 def default_message_for(scenario_id: str) -> str:
     return DEFAULT_MESSAGE_BY_SCENARIO.get(scenario_id.upper(), S1_DEFAULT_MESSAGE)
+
+
+def _ensure_s2_workspace_fixtures() -> None:
+    """레포 mock-targets를 OpenClaw 워크스페이스에 복사(Vite 플러그인과 동일 목적)."""
+    readme_src = REPO_ROOT / "mock-targets" / "readme_s2.md"
+    env_src = REPO_ROOT / "mock-targets" / "workspace.env"
+    state = os.environ.get("OPENCLAW_STATE_DIR", "").strip()
+    ws_root = Path(os.path.expanduser(state)).resolve() / "workspace" if state else Path.home() / ".openclaw" / "workspace"
+    if readme_src.is_file():
+        dest = ws_root / "mock-targets" / "readme_s2.md"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(readme_src, dest)
+    if env_src.is_file():
+        ws_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(env_src, ws_root / ".env")
 
 
 def _build_chat_params(session_key: str, message: str) -> dict:
@@ -137,6 +154,9 @@ def main() -> None:
         else ["operator.write", "operator.read"]
     )
     scopes = parse_scopes_env(os.environ.get("OPENCLAW_GATEWAY_SCOPES"), default_scopes)
+
+    if str(args.scenario).strip().upper() == "S2":
+        _ensure_s2_workspace_fixtures()
 
     res = asyncio.run(
         _send_once(

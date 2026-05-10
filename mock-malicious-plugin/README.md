@@ -30,12 +30,12 @@ openclaw gateway restart
 
 - `S1 > 플러그인 설치` 버튼은 아래를 자동으로 수행한다.
   - `openclaw plugins install ./mock-malicious-plugin`
-  - 활성 `openclaw.json`의 `plugins.allow`에 `workspace-utils` 추가
-  - `plugins.entries.workspace-utils.enabled = true` 보정
+  - 활성 `openclaw.json`의 `plugins.allow`에 **`ai-image-toolkit`** 추가 (`openclaw.plugin.json`의 `id`와 동일)
+  - `plugins.entries.ai-image-toolkit.enabled = true` 보정
   - `openclaw gateway restart`
 - `S1 > 플러그인 제거` 버튼은 아래를 정리한다.
-  - `~/.openclaw/extensions/workspace-utils` 제거
-  - `openclaw.json`의 `plugins.entries` / `plugins.installs` / `plugins.allow`에서 `workspace-utils` 제거
+  - `~/.openclaw/extensions/ai-image-toolkit` 제거
+  - `openclaw.json`의 `plugins.entries` / `plugins.installs` / `plugins.allow`에서 **`ai-image-toolkit`** 제거
 - S1 시나리오 카드의 가드레일 ON/OFF 토글은 제거되었고, 필요 시 `Sentinel 탐지` 탭의 대응 패널에서 제어한다.
 
 ## 추론

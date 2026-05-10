@@ -302,6 +302,57 @@ function resolveOpenClawConfigPath(env: NodeJS.ProcessEnv = process.env): string
   return path.join(os.homedir(), ".openclaw", "openclaw.json");
 }
 
+/** 에이전트가 파일 도구로 접근하는 OpenClaw 워크스페이스 루트 */
+function openclawWorkspaceRoot(): string {
+  const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    return path.join(resolveUserPath(stateDir), "workspace");
+  }
+  return path.join(os.homedir(), ".openclaw", "workspace");
+}
+
+/**
+ * S2: 레포 `mock-targets`를 게이트웨이 워크스페이스에 맞춘다.
+ * - `mock-targets/readme_s2.md` (프롬프트 경로)
+ * - 워크스페이스 루트 `.env` ← `workspace.env` (README 인젝션 단계용)
+ * macOS/Linux: 네이티브 복사. Windows: OpenClaw가 WSL에서 도는 경우를 위해 WSL 홈 아래로 복사.
+ */
+async function ensureS2WorkspaceFixtures(): Promise<void> {
+  const readmeSrc = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
+  const envSrc = path.join(REPO_ROOT, "mock-targets", "workspace.env");
+
+  if (process.platform === "win32") {
+    const wslHome = os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
+    const wsRoot = `${wslHome}/.openclaw/workspace`;
+    const readmeDest = `${wsRoot}/mock-targets/readme_s2.md`;
+    const envDest = `${wsRoot}/.env`;
+    if (!fs.existsSync(readmeSrc)) return;
+    const cmdParts = [`mkdir -p "$(dirname '${readmeDest}')"`, `&& cp '${toWslPath(readmeSrc)}' '${readmeDest}'`];
+    if (fs.existsSync(envSrc)) {
+      cmdParts.push(`&& cp '${toWslPath(envSrc)}' '${envDest}'`);
+    }
+    await execFileAsync("wsl", ["bash", "-c", cmdParts.join(" ")], { timeout: 15_000 }).catch((err) => {
+      console.error("[sg-sentinel] S2 WSL workspace sync failed:", err);
+    });
+    return;
+  }
+
+  try {
+    const wsRoot = openclawWorkspaceRoot();
+    if (fs.existsSync(readmeSrc)) {
+      const readmeDest = path.join(wsRoot, "mock-targets", "readme_s2.md");
+      fs.mkdirSync(path.dirname(readmeDest), { recursive: true });
+      fs.copyFileSync(readmeSrc, readmeDest);
+    }
+    if (fs.existsSync(envSrc)) {
+      fs.mkdirSync(wsRoot, { recursive: true });
+      fs.copyFileSync(envSrc, path.join(wsRoot, ".env"));
+    }
+  } catch (e) {
+    console.error("[sg-sentinel] S2 workspace fixture sync failed:", e);
+  }
+}
+
 function ensurePluginAllowedAndEnabled(configPath: string, pluginId: string): { updated: boolean } {
   let changed = false;
   let cfg: Record<string, unknown> = {};
@@ -611,19 +662,8 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
             return;
           }
-          // S2: README를 원본에서 WSL workspace로 복원
           if (scenarioId === "S2") {
-            const srcReadme = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
-            if (fs.existsSync(srcReadme)) {
-              try {
-                const srcWsl = toWslPath(srcReadme);
-                const wslDest = path.join(
-                  os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
-                  ".openclaw", "workspace", "mock-targets", "readme_s2.md"
-                );
-                await execFileAsync("wsl", ["bash", "-c", `mkdir -p "$(dirname '${wslDest}')" && cp '${srcWsl}' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
-              } catch { /* silent */ }
-            }
+            await ensureS2WorkspaceFixtures();
           }
           const streamPy = path.join(REPO_ROOT, "scripts", "runner", "chat_stream.py");
           if (!fs.existsSync(streamPy)) {
@@ -686,20 +726,8 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
             return;
           }
-          // S2 실행 전 README를 원본에서 WSL workspace로 복원 (이전 실행에서 모델이 파일을 수정했을 수 있음)
           if (scenarioId === "S2") {
-            const srcReadme = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
-            if (fs.existsSync(srcReadme)) {
-              try {
-                const content = fs.readFileSync(srcReadme, "utf8");
-                const wslDest = path.join(
-                  os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
-                  ".openclaw", "workspace", "mock-targets", "readme_s2.md"
-                );
-                const srcWsl = srcReadme.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
-                await execFileAsync("wsl", ["bash", "-c", `mkdir -p "$(dirname '${wslDest}')" && cp '${srcWsl}' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
-              } catch { /* silent */ }
-            }
+            await ensureS2WorkspaceFixtures();
           }
 
           const sendPy = sendScenarioScript();
