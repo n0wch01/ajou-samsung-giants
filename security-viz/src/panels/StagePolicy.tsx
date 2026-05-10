@@ -20,8 +20,17 @@ type CatalogGroup = {
 };
 
 function extractGroups(data: unknown): CatalogGroup[] {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
-  const o = data as Record<string, unknown>;
+  let root = data;
+  // 과거 policy_query가 RPC 프레임 전체를 넘기던 경우: groups는 payload 안에 있음
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    const o = root as Record<string, unknown>;
+    if (!Array.isArray(o.groups) && o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)) {
+      const inner = o.payload as Record<string, unknown>;
+      if (Array.isArray(inner.groups)) root = o.payload;
+    }
+  }
+  if (!root || typeof root !== "object" || Array.isArray(root)) return [];
+  const o = root as Record<string, unknown>;
   const groups = o.groups;
   if (!Array.isArray(groups)) return [];
   return groups
@@ -167,10 +176,17 @@ function ConfigValueCell({ value }: { value: unknown }) {
 
 function ConfigView({ data }: { data: unknown }) {
   const [filter, setFilter] = useState("");
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
+  let root: unknown = data;
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    const o = root as Record<string, unknown>;
+    if (o.type === "res" && o.payload !== undefined && typeof o.payload === "object" && !Array.isArray(o.payload)) {
+      root = o.payload;
+    }
+  }
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
     return <pre className="policy-raw-pre" style={{ marginTop: 8 }}>{JSON.stringify(data, null, 2)}</pre>;
   }
-  const rows = flattenConfig(data);
+  const rows = flattenConfig(root);
   const q = filter.toLowerCase();
   const visible = q ? rows.filter((r) => r.path.toLowerCase().includes(q)) : rows;
 

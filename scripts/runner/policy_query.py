@@ -35,7 +35,20 @@ async def _query(ws_url: str, token: str, method: str) -> dict:
             result = await sess.rpc(method, {}, timeout_s=15.0)
         finally:
             await sess.close()
-        return {"ok": True, "payload": result}
+
+        if not isinstance(result, dict):
+            return {"ok": False, "message": "invalid gateway rpc response"}
+        if not result.get("ok"):
+            err = result.get("error") or {}
+            if isinstance(err, dict):
+                msg = err.get("message") or err.get("code") or json.dumps(err, ensure_ascii=False)
+            else:
+                msg = str(err)
+            return {"ok": False, "message": str(msg)}
+
+        # 게이트웨이 v3: res 프레임 전체가 아니라 비즈니스 payload만 넘긴다.
+        # (UI는 tools.catalog 의 groups 등 최상위 필드를 기대함)
+        return {"ok": True, "payload": result.get("payload")}
     except Exception as e:
         return {"ok": False, "message": str(e)}
 
