@@ -820,11 +820,12 @@ type StepProps = {
   status: StepStatus;
   badge?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
 };
 
-function Step({ num, label, status, badge, children }: StepProps) {
+function Step({ num, label, status, badge, children, className }: StepProps) {
   return (
-    <div className={`ft-step ft-step-${status}`}>
+    <div className={["ft-step", `ft-step-${status}`, className].filter(Boolean).join(" ")}>
       <div className="ft-step-header">
         <StatusDot status={status} />
         <span className="ft-step-num">{num}</span>
@@ -1330,6 +1331,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
 
                 {/* ⑤ 에이전트 최종 응답 */}
                 <Step
+                  className="ft-step-agent-final"
                   num={turn.tools.length > 0 && turn.toolStatus !== "pending" ? "⑤" : "④"}
                   label="에이전트 최종 응답"
                   status={turn.responseStatus}

@@ -3035,13 +3035,27 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 }
 
 .ft-response-agent-final {
-  max-height: min(48vh, 480px);
-  min-height: 80px;
+  max-height: min(62vh, 640px);
+  min-height: 140px;
   width: 100%;
   box-sizing: border-box;
   border: none;
   background: rgba(0,0,0,0.12);
-  padding: 10px 12px;
+  padding: 12px 14px;
+  font-size: 0.93rem;
+  line-height: 1.62;
+}
+
+/* 실행 흐름 2행: 최종 응답 스텝은 기본 .ft-step(280×480) 제한을 풀고 넓게 */
+.ft-row-second > .ft-step-agent-final {
+  flex: 2 1 400px;
+  max-width: min(100%, 720px);
+  max-height: min(78vh, 820px);
+}
+
+.ft-row-second > .ft-step-agent-final .ft-step-body {
+  flex: 1;
+  min-height: 0;
 }
 
 .ft-muted {
