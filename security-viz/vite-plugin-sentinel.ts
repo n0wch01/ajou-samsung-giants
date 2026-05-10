@@ -75,6 +75,44 @@ async function runPythonInWsl(
   return execFileAsync(pickPython(), [scriptPath, ...args], opts);
 }
 
+/** POSIX sh single-quoted string (paths may contain spaces). */
+function shellQuoteSingleArg(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+let wslOpenclawResolvePromise: Promise<string> | null = null;
+
+/**
+ * Windows + WSL: OPENCLAW_BIN이 있으면 그대로 쓰고, 없으면 로그인 셸 PATH에서 openclaw 한 번 탐색한다.
+ */
+function resolveOpenclawBinForWin32(): Promise<string> {
+  const explicit = process.env.OPENCLAW_BIN?.trim();
+  if (explicit) return Promise.resolve(explicit);
+
+  if (!wslOpenclawResolvePromise) {
+    wslOpenclawResolvePromise = (async () => {
+      try {
+        const { stdout } = await execFileAsync("wsl", ["bash", "-lc", "command -v openclaw"], {
+          timeout: 15_000,
+        });
+        const line = stdout
+          .trim()
+          .split("\n")
+          .map((s) => s.trim())
+          .find(Boolean);
+        if (!line) throw new Error("empty PATH");
+        return line;
+      } catch {
+        throw new Error(
+          "Windows에서 openclaw 실행 파일을 찾지 못했습니다. WSL에 openclaw를 설치하거나, " +
+            "OPENCLAW_BIN 환경 변수에 절대 경로를 설정하세요 (예: WSL의 `which openclaw` 결과).",
+        );
+      }
+    })();
+  }
+  return wslOpenclawResolvePromise;
+}
+
 /**
  * Windows에서 openclaw는 WSL에 설치되어 있어 wsl bash -lc 경유로 실행한다.
  * 로그인 셸(-l)을 써야 ~/.bashrc/.profile의 PATH가 적용된다.
@@ -84,10 +122,11 @@ async function runOpenclaw(
   opts: { cwd?: string; timeout: number },
 ): Promise<{ stdout: string; stderr: string }> {
   if (process.platform === "win32") {
-    const oclawBin = process.env.OPENCLAW_BIN?.trim() || "/home/hjdoh/.npm-global/bin/openclaw";
-    const escaped = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(" ");
+    const oclawBin = await resolveOpenclawBinForWin32();
+    const escaped = args.map((a) => shellQuoteSingleArg(a)).join(" ");
     // 이전 실패한 install staging 잔여물(777 권한) 제거 후 umask 022로 실행
-    const shellCmd = `rm -rf ~/.openclaw/extensions/.openclaw-install-stage-* 2>/dev/null; umask 022 && '${oclawBin}' ${escaped}`;
+    const shellCmd =
+      `rm -rf ~/.openclaw/extensions/.openclaw-install-stage-* 2>/dev/null; umask 022 && ${shellQuoteSingleArg(oclawBin)} ${escaped}`;
     return execFileAsync("wsl", ["bash", "-c", shellCmd], opts);
   }
   return execFileAsync("openclaw", args, opts);
