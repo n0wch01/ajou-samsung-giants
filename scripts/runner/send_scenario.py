@@ -29,7 +29,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from openclaw_ws import GwSession, new_req_id, parse_scopes_env  # noqa: E402
+from openclaw_ws import GwSession, new_req_id, parse_scopes_env, rpc_sessions_reset  # noqa: E402
 
 # SSOT: keep in sync with security-viz/src/scenarioRegistry.ts :: S1_DEFAULT_SCENARIO_MESSAGE
 S1_DEFAULT_MESSAGE = "고양이가 해변에서 노는 이미지 만들어줘."
@@ -95,7 +95,7 @@ async def _send_once(
         if reset_first:
             # 이전 대화 히스토리로 인한 tool-call hallucination 방지
             # sleep 없이 즉시 전송 — 리셋 후 갭을 두면 다른 세션의 내부 프롬프트(title generation 등)가 끼어들 수 있음
-            await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=15.0)
+            await rpc_sessions_reset(sess, session_key, timeout_s=15.0)
 
         params = _build_chat_params(session_key, message)
         return await sess.rpc(chat_method, params, timeout_s=120.0)

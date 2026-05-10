@@ -12,7 +12,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from openclaw_ws import GwSession, new_req_id  # noqa: E402
+from openclaw_ws import GwSession, new_req_id, rpc_sessions_reset  # noqa: E402
 
 
 async def main() -> None:
@@ -35,7 +35,7 @@ async def main() -> None:
 
     if reset_first:
         try:
-            await sess.rpc("sessions.reset", {"key": session_key, "reason": "reset"}, timeout_s=15.0)
+            await rpc_sessions_reset(sess, session_key, timeout_s=15.0)
         except Exception as e:
             print(json.dumps({"type": "error", "message": f"sessions.reset failed: {e}"}), flush=True)
             await sess.close()
