@@ -162,6 +162,7 @@ npm run dev
 
 | 증상 | 해결 방법 |
 |------|----------|
+| S1인데 모델이 `image_generate` 등 **내장 이미지 툴만** 호출함 | 정책 검사에서 실제 툴 이름 확인 후, **랩에서만** `gateway.tools.deny`에 그 이름 추가·재시작. 필요 시 프롬프트에 플러그인 툴만 쓰라고 한 줄 추가 ([scenarios/s1-plugin-supply-chain.md](../scenarios/s1-plugin-supply-chain.md) LLM 팁) |
 | S1 실행 후 "직접 응답 (툴 호출 없음)" | S1은 세션을 자동 리셋합니다. 한 번 더 실행해보세요 |
 | S2가 .env를 읽지 않음 | S1을 먼저 실행한 후 S2를 실행하세요 |
 | Sentinel 한글 깨짐 | `npm run dev` 재시작 (PYTHONUTF8=1 적용 필요) |

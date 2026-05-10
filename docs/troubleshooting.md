@@ -123,6 +123,22 @@ cd security-viz && npm run dev
 
 ---
 
+### S1 시나리오: `image_generate` 등 내장 툴만 호출되고 `ai_image_gen`은 안 씀
+
+**원인**: `tools.effective`(또는 에이전트에 노출되는 툴 집합)에 **내장 이미지 생성 툴**과 플러그인 **`ai_image_gen`** 이 함께 있으면, 모델이 이름·설명만으로는 내장 쪽을 더 자주 고른다.
+
+**랩에서의 해결 순서**:
+
+1. **정확한 내장 툴 이름 확인** — 대시보드 **정책 검사 → 도구 목록 확인** 또는 `trace.jsonl`의 `session.tool`에서 한 번 실행 후 로그를 본다.
+2. **해당 툴을 일시적으로 차단** — OpenClaw 설정의 `gateway.tools.deny`에 그 이름을 추가하고 게이트웨이를 재시작한다. (플러그인을 막는 게 아니라 **내장 이미지 툴만** deny.)
+3. S1을 다시 실행해 `ai_image_gen` 호출을 확인한다.
+
+**주의**: `scripts/runner/toggle_guardrail.py`의 `GUARDRAIL_ACTION=on` 은 **플러그인 툴을 deny 목록에 넣는(차단하는)** 교육용 프리셋이다. “플러그인만 쓰게 만들기”와는 반대 방향이므로 혼동하지 말 것.
+
+상세 문구·마지막 수단(프롬프트에 플러그인 지정)은 [../scenarios/s1-plugin-supply-chain.md](../scenarios/s1-plugin-supply-chain.md)를 참고한다.
+
+---
+
 ### SSE findings 스트림 연결 오류
 
 1. `python scripts/sentinel/findings_dev_server.py`가 실행 중인지 확인 (기본 포트 8787)
