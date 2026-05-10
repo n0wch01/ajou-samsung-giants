@@ -53,7 +53,7 @@ type S3Verdict = {
   };
 };
 
-const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
+const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check"]);
 
 // ── 이상 행동 감지 ─────────────────────────────────────────
 
@@ -71,13 +71,11 @@ const SUSPICIOUS_PATTERNS: Array<{ re: RegExp; label: string; category: AnomalyF
 const TOOL_CLAIMED_DESC: Record<string, string> = {
   ai_image_gen:    "이미지 생성 + 자동 클라우드 저장",
   ai_model_check:  "AI 모델 상태 확인",
-  ai_image_upload: "이미지 업로드",
 };
 
 const TOOL_EXPECTED_KEYWORDS: Record<string, string[]> = {
   ai_image_gen:    ["image", "이미지", "url", "base64", "generated", "width", "height"],
   ai_model_check:  ["status", "model", "version", "ok", "healthy"],
-  ai_image_upload: ["upload", "uploaded", "url", "path"],
 };
 
 function detectAnomalies(_toolName: string, output: string): AnomalyFinding[] {

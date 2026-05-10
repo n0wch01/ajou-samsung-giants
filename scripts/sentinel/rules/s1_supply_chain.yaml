@@ -7,14 +7,14 @@ rules:
     title: S1 위장 플러그인 등록 흔적 감지
     message: >-
       trace에서 ai-image-toolkit 플러그인이 등록한 도구(ai_image_gen,
-      ai_image_upload, ai_model_check) 신호가 발견됐습니다.
+      ai_model_check) 신호가 발견됐습니다.
       "무료 이미지 생성"으로 위장하고 있지만 베이스라인에 없는 플러그인입니다.
     recommendedAction: >-
       plugins list로 설치된 플러그인 출처를 확인하세요. 예상하지 않은 플러그인이면
       즉시 제거하고 tools.effective 베이스라인을 갱신하세요.
     match:
       type: trace_line_regex
-      pattern: 'ai_image_gen|ai_image_upload|ai_model_check|ai-image-toolkit'
+      pattern: 'ai_image_gen|ai_model_check|ai-image-toolkit'
 
   - id: s1-any-new-tool-vs-baseline
     severity: medium
@@ -39,8 +39,8 @@ rules:
       실제 동작은 workspace에서 .env, API 키, DB 접속 정보를 수집합니다.
       사용자와 에이전트 모두 이미지 생성이라고 인식한 채 자격증명이 탈취됩니다.
     recommendedAction: >-
-      session.tool 이벤트를 확인해 어떤 데이터가 수집됐는지 검토하세요.
-      ai_image_upload 호출이 이어지는지 즉시 모니터링하세요.
+      session.tool 이벤트를 확인해 어떤 데이터가 수집·전송됐는지 검토하세요.
+      본 모의 플러그인은 한 번의 ai_image_gen 호출에 recon+exfil이 묶여 있습니다.
     match:
       type: event_payload_regex
       event: session.tool
@@ -69,8 +69,7 @@ rules:
     title: 도구 페이로드에서 민감 정보 패턴 감지
     message: >-
       session.tool 페이로드에서 API 키, 비밀번호, PEM 키, AWS 자격증명 패턴이
-      감지됐습니다. ai_image_gen이 수집한 mock 자격증명이
-      ai_image_upload로 전달됐을 가능성이 높습니다.
+      감지됐습니다. ai_image_gen 출력에 모의 자격증명 문자열이 포함됐을 가능성이 높습니다.
     recommendedAction: >-
       실제 자격증명인지 확인하세요. 실제라면 즉시 로테이션하고
       로그 리댁션을 강화하세요.
@@ -98,8 +97,8 @@ rules:
     severity: medium
     title: S1 exfil 스텁 메타(s1_chain) 포함
     message: >-
-      ai_image_upload 출력에 s1_chain JSON 줄이 포함됐습니다(phase=exfil).
-      "클라우드 업로드"로 위장한 유출 단계 완주 여부를 판별할 때 참고하세요.
+      trace에 s1_chain JSON 줄(phase=exfil)이 포함됐습니다. ai_image_gen이
+      한 호출에 넣는 스텁 메타로, 유출 단계 완주 여부를 판별할 때 참고하세요.
     recommendedAction: >-
       payload 길이·correlation_id를 런북에 기록하고, Guardrail 차단 여부를
       approval 이벤트와 교차 확인하세요.
