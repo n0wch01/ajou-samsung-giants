@@ -877,7 +877,6 @@ function RealtimeInterceptBanner({
         <div className="ft-intercept-header">
           <span className="ft-intercept-icon">🛡</span>
           <span className="ft-intercept-title">Sentinel 실시간 인터셉트</span>
-          <span className="ft-intercept-sub">툴 결과 수신 즉시 탐지됨</span>
         </div>
 
         {hasAnomaly && (
