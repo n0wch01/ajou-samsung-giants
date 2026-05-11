@@ -454,6 +454,10 @@ class RealTimeRateDetector:
         self._call_times: dict[tuple[str, str], list[float]] = defaultdict(list)
         self._consecutive: dict[tuple[str, str], list[str]] = defaultdict(list)
 
+    def reset(self) -> None:
+        self._call_times.clear()
+        self._consecutive.clear()
+
     def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
         if entry.get("entry_type") != "gateway_event":
             return []

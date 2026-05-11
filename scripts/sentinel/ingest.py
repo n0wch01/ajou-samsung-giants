@@ -102,12 +102,13 @@ def _default_rules_dir_path() -> Path:
 
 
 def _ingest_gateway_scopes() -> list[str]:
-    """subscribe / tools.* RPCs need operator.read; merge if env omitted it."""
-    scopes = parse_scopes_env(
-        os.environ.get("OPENCLAW_GATEWAY_SCOPES"), ["operator.read"]
-    )
+    """subscribe / tools.* RPCs need operator.read; sessions.abort needs operator.write."""
+    default = ["operator.read"]
+    if _truthy("SENTINEL_AUTO_ABORT"):
+        default = ["operator.read", "operator.write"]
+    scopes = parse_scopes_env(os.environ.get("OPENCLAW_GATEWAY_SCOPES"), default)
     if "operator.read" not in scopes:
-        return ["operator.read", *scopes]
+        scopes = ["operator.read", *scopes]
     return scopes
 
 
@@ -141,13 +142,34 @@ def _normalize_gateway_event(frame: dict[str, Any]) -> dict[str, Any]:
             v = payload.get(key)
             if isinstance(v, str):
                 summary[key] = v
+        # agent stream events store tool info in payload.data
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("name", "tool", "toolName", "phase", "state"):
+                if key not in summary:
+                    v = data.get(key)
+                    if isinstance(v, str):
+                        summary[key] = v
         text = payload.get("text") or payload.get("content") or payload.get("message")
         if isinstance(text, str):
             summary["text_preview"] = text[:400]
     if "approval" in event.lower():
         summary["kind"] = "approval"
     elif event == "session.tool" or event.startswith("session.tool."):
-        summary["kind"] = "session.tool"
+        # phase=update/result은 같은 호출의 중복 이벤트이므로 start(또는 미지정)만 카운트
+        _phase = summary.get("phase") or ""
+        if not _phase or _phase == "start":
+            summary["kind"] = "session.tool"
+        else:
+            summary["kind"] = "other"
+    elif event == "agent":
+        # OpenClaw sends tool calls as agent stream events (stream="tool", phase="start")
+        _payload = payload if isinstance(payload, dict) else {}
+        _data = _payload.get("data") if isinstance(_payload.get("data"), dict) else {}
+        if _payload.get("stream") == "tool" and _data.get("phase") == "start":
+            summary["kind"] = "session.tool"
+        else:
+            summary["kind"] = "other"
     elif event == "session.message":
         summary["kind"] = "session.message"
     elif event == "chat" or event.startswith("chat."):
@@ -311,6 +333,19 @@ async def _run_ingest_once(
             print(f"[sentinel-ingest] AUTO-ABORT exception: {e}", file=sys.stderr)
 
     async def on_event(msg: dict[str, Any]) -> None:
+        # 새 에이전트 실행(lifecycle phase=start)이 시작되면 abort 상태·detector 카운터 리셋
+        _pl = msg.get("payload") if isinstance(msg, dict) else {}
+        _data = _pl.get("data") if isinstance(_pl, dict) else {}
+        if (
+            msg.get("event") == "agent"
+            and isinstance(_pl, dict) and _pl.get("stream") == "lifecycle"
+            and isinstance(_data, dict) and _data.get("phase") == "start"
+        ):
+            if abort_state is not None:
+                abort_state["fired"] = False
+            if detector is not None:
+                detector.reset()
+
         rec = _trace_record(
             entry_type="gateway_event",
             frame=msg,
@@ -341,6 +376,8 @@ async def _run_ingest_once(
                     "message": "realtime finding",
                     "finding": f,
                 })
+                with open(realtime_path, "a", encoding="utf-8") as _rf:
+                    _rf.write(json.dumps(f, ensure_ascii=False) + "\n")
             asyncio.create_task(_maybe_auto_abort(findings))
 
     session.on_event(on_event)

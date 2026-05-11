@@ -1118,7 +1118,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
   const turn = useMemo(() => getLastScenarioTurn(entries), [entries]);
 
   const hasPluginTool = turn?.hasPluginTool ?? false;
-  const rtFindings = useRealtimeFindings(hasPluginTool, turn?.at);
+  const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3", turn?.at);
   const exfil = useExfilLog(hasPluginTool, turn?.at);
   // Vite 개발 서버에서만 게이트 API가 있음. turn 에 묶지 않음 — 타임라인 파싱 전에도 대기 건 표시.
   const fetchGate = useFetchGatePending(import.meta.env.DEV, turn?.at);
