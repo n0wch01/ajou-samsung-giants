@@ -148,4 +148,3 @@ sequenceDiagram
 ## 참고
 
 - 게이트웨이 이벤트·프로토콜: `openclaw/docs/gateway/protocol.md` (SG 내 `openclaw/` 벤더 트리 기준).
-- DGX Spark 연결 절차: [docs/test-bed-dgx-spark.md](../docs/test-bed-dgx-spark.md).

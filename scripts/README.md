@@ -43,8 +43,6 @@ PYTHONPATH=scripts python scripts/runner/send_scenario.py --session-key agent:ma
 
 ## 문서
 
-- Sentinel 정책·오탐·`sessions.abort` 가드: [../docs/sentinel.md](../docs/sentinel.md)
-- DGX Spark 테스트 베드: [../docs/test-bed-dgx-spark.md](../docs/test-bed-dgx-spark.md)
 - 러너 개요: [runner/README.md](runner/README.md)
 - Sentinel 모듈 개요: [sentinel/README.md](sentinel/README.md)
 

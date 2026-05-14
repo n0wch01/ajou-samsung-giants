@@ -10,7 +10,7 @@
 ## 목차
 
 1. [OpenClaw (대상 에이전트)](#openclaw-대상-에이전트)
-2. [문서와 SSOT](#문서와-ssot)
+2. [SSOT](#ssot)
 3. [빠른 시작](#빠른-시작)
 4. [팀원 실행 가이드](#팀원-실행-가이드)
 5. [구성 요약](#구성-요약)
@@ -34,14 +34,7 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 
 ---
 
-## 문서와 SSOT
-
-| 문서 | 용도 |
-|------|------|
-| [docs/test-bed-dgx-spark.md](docs/test-bed-dgx-spark.md) | **NVIDIA DGX Spark** 등에서 게이트웨이 연결·검증 |
-| [docs/sentinel.md](docs/sentinel.md) | Python Sentinel 정책, 오탐, `sessions.abort` 가드 |
-| [docs/goals.md](docs/goals.md) | 목표·범위 |
-| [docs/troubleshooting.md](docs/troubleshooting.md) | 자주 막히는 지점 |
+## SSOT
 
 시나리오 카피는 UI와 러너가 맞춥니다: `security-viz/src/scenarioRegistry.ts` ↔ `scripts/runner/send_scenario.py` (`S1_DEFAULT_MESSAGE` 주석 참고).
 

@@ -136,6 +136,5 @@ sequenceDiagram
 ## 참고
 
 - 게이트웨이 이벤트·프로토콜: `openclaw/docs/gateway/protocol.md` (SG 내 `openclaw/` 벤더 트리 기준).
-- DGX Spark 연결 절차: [docs/test-bed-dgx-spark.md](../docs/test-bed-dgx-spark.md).
 - 규칙 정의: [scripts/sentinel/rules/s3_api_abuse.yaml](../scripts/sentinel/rules/s3_api_abuse.yaml).
 - 검출 로직(`rate_limit` / `loop_detect` 매처, `RealTimeRateDetector`): [scripts/sentinel/detect.py](../scripts/sentinel/detect.py).
