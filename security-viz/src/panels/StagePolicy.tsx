@@ -344,7 +344,6 @@ function RateLimitSection({ highlightSection }: { highlightSection?: string | nu
   return (
     <div ref={ref} className="pl-check-card policy-rl-card" id="policy-rate-limit">
       <div className="pl-check-card-header">
-        <span className="pl-check-num">04</span>
         <div className="pl-check-info">
           <span className="pl-check-title">API Abuse 탐지 정책</span>
           <code className="pl-check-method">rate-limit</code>
@@ -494,6 +493,9 @@ export function StagePolicy(props: StagePolicyProps) {
         </div>
       </div>
 
+      {/* ── API Abuse 탐지 정책 ── */}
+      <RateLimitSection highlightSection={props.highlightSection} />
+
       {/* ── 검사 항목 ── */}
       <h3 className="pl-section-title">검사 항목</h3>
       <div className="pl-check-list">
@@ -636,8 +638,6 @@ export function StagePolicy(props: StagePolicyProps) {
           )}
         </div>
 
-        {/* 카드 4: API Abuse 탐지 정책 */}
-        <RateLimitSection highlightSection={props.highlightSection} />
 
       </div>
 
