@@ -53,9 +53,9 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
    [scripts/README.md](scripts/README.md) — venv, `pip install -r scripts/requirements.txt`, `PYTHONPATH=scripts` 로 `ingest` / `detect` / `respond` / `send_scenario` 실행.
 
 2. **대시보드 (security-viz)**  
-   저장소 루트에서 `./run-viz.sh` 를 쓰면 (선택) `OPENCLAW_GATEWAY_WS_URL`·토큰이 있을 때 ingest와 Vite dev를 함께 띄웁니다. 수동으로는 `cd security-viz && npm install && npm run dev` 후 브라우저에서 연결·토큰 입력.
+   저장소 루트에서 `./run-viz.sh` 를 쓰면 (선택) `OPENCLAW_GATEWAY_WS_URL`·토큰이 있을 때 ingest와 Vite dev를 함께 띄웁니다. `Ctrl+C` 로 종료하면 Sentinel ingest, Vite 서버, OpenClaw 게이트웨이가 모두 함께 종료됩니다. 수동으로는 `cd security-viz && npm install && npm run dev` 후 브라우저에서 연결·토큰 입력.
    S1 시나리오 카드의 `플러그인 설치` 버튼은 `mock-malicious-plugin`(`ai-image-toolkit`) 설치 뒤 `plugins.allow`/`plugins.entries`를 보정하고 `openclaw gateway restart`까지 자동 수행합니다. `플러그인 제거`는 확장 디렉터리와 `entries`/`installs`/`allow`에서 해당 id를 함께 정리합니다.
-   규칙 검증은 상단 `Sentinel 탐지` 탭에서 실행합니다. (Sentinel ingest는 `run-viz.sh`·터미널에서 `ingest.py`로 병행 가능.)
+   탐지 결과는 상단 **Monitoring** 탭에서 확인합니다. (Sentinel ingest는 `run-viz.sh`·터미널에서 `ingest.py`로 병행 가능.)
 
 3. **S1 랩 플러그인**  
    [mock-malicious-plugin/README.md](mock-malicious-plugin/README.md) — 공급망 시나리오용 **랩 전용** 목업 플러그인입니다.
@@ -133,7 +133,7 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 
 ### 7. 시나리오 실행
 
-**시나리오 실행** 탭에서 S1·S2·S3 카드의 **시나리오 실행** 버튼을 누릅니다.
+**Test Scenario** 탭에서 S1·S2·S3 카드의 **시나리오 실행** 버튼을 누릅니다.
 
 | 시나리오 | 설명 | 비고 |
 |----------|------|------|
@@ -143,7 +143,7 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 
 ### 주의사항
 
-- **정책 검사** 탭의 `정책 설정 확인` / `도구 목록 확인` 은 `~/.openclaw/identity/device.json` 이 있어야 동작합니다 (OpenClaw CLI 설치 후 페어링 완료 상태).
+- **Policy** 탭의 `정책 설정 확인` / `도구 목록 확인` 은 `~/.openclaw/identity/device.json` 이 있어야 동작합니다 (OpenClaw CLI 설치 후 페어링 완료 상태).
 - `vite-plugin-sentinel.ts` 를 수정했다면 `npm run dev` 를 재시작해야 반영됩니다.
 
 ---
