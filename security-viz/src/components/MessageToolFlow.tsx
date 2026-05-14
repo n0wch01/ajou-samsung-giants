@@ -8,6 +8,8 @@ import { type GwFrame } from "../gateway/protocol";
 import { apiPath } from "../lib/publicAsset";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { useFindings } from "../sentinel/useFindings";
+import type { NavAction } from "../App";
 
 type MessageToolFlowProps = {
   entries: TimelineEntry[];
@@ -19,6 +21,8 @@ type MessageToolFlowProps = {
   injectFrame?: (frame: GwFrame) => void;
   /** 채팅 탭에서 전송이 성공했을 때(시나리오 S1 전용 배지 맥락 해제 등) */
   onChatSent?: () => void;
+  /** 탭/모니터링 네비게이션 콜백 */
+  onNavigate?: (action: NavAction) => void;
 };
 
 export type ToolLine = {
@@ -834,6 +838,14 @@ function buildChatTurns(entries: TimelineEntry[]): {
   };
 }
 
+function detectCategoryLabel(ruleId: string): string {
+  const id = ruleId.toLowerCase();
+  if (id.includes("s1") || id.includes("plugin") || id.includes("supply")) return "악성 플러그인";
+  if (id.includes("s2") || id.includes("injection") || id.includes("readme") || id.includes("md") || id.includes("prompt")) return "악성 MD";
+  if (id.includes("s3") || id.includes("rate") || id.includes("abuse") || id.includes("loop") || id.includes("exhaustion")) return "API Abuse";
+  return "보안 위협";
+}
+
 export function MessageToolFlow(props: MessageToolFlowProps) {
   const [openToolId, setOpenToolId] = useState<string | null>(null);
   const { turns, orphanTools, orphanAssistantChunks } = useMemo(
@@ -844,6 +856,27 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
+
+  // 탐지 알림 배너
+  const { findings } = useFindings({ pollMs: 1000, useSse: false });
+  const prevFindingIds = useRef<Set<string>>(new Set());
+  const [newAlerts, setNewAlerts] = useState<Array<{ id: string; label: string; findingId: string }>>([]);
+
+  useEffect(() => {
+    const currentIds = new Set(findings.map((f) => f.id));
+    const fresh = findings.filter((f) => !prevFindingIds.current.has(f.id));
+    if (fresh.length > 0) {
+      setNewAlerts((prev) => [
+        ...prev,
+        ...fresh.map((f) => ({
+          id: f.id,
+          label: detectCategoryLabel(f.ruleId),
+          findingId: f.id,
+        })),
+      ]);
+    }
+    prevFindingIds.current = currentIds;
+  }, [findings]);
 
   // 사용자가 위로 스크롤하면 자동 스크롤 잠시 중단
   useEffect(() => {
@@ -977,6 +1010,40 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         ))}
         <div ref={bottomRef} />
       </div>
+
+      {/* 탐지 알림 배너 */}
+      {newAlerts.length > 0 && (
+        <div className="chat-detect-banners">
+          {newAlerts.map((alert) => (
+            <div key={alert.id} className="chat-detect-banner">
+              <span className="chat-detect-banner-icon">⚠</span>
+              <span className="chat-detect-banner-text">
+                <strong>{alert.label}</strong> 탐지로 인해 세션이 중지되었습니다
+              </span>
+              {props.onNavigate && (
+                <button
+                  type="button"
+                  className="chat-detect-banner-link"
+                  onClick={() => {
+                    props.onNavigate?.({ tab: "monitoring", highlightFindingId: alert.findingId });
+                    setNewAlerts((prev) => prev.filter((a) => a.id !== alert.id));
+                  }}
+                >
+                  자세히 보기 →
+                </button>
+              )}
+              <button
+                type="button"
+                className="chat-detect-banner-close"
+                onClick={() => setNewAlerts((prev) => prev.filter((a) => a.id !== alert.id))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <ChatInput
         wsUrl={props.wsUrl}
         token={props.token}

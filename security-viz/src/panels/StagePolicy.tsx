@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath } from "../lib/publicAsset";
 
 // ── tools.catalog 파싱 ────────────────────────────────────────────────────
@@ -21,7 +21,6 @@ type CatalogGroup = {
 
 function extractGroups(data: unknown): CatalogGroup[] {
   let root = data;
-  // 과거 policy_query가 RPC 프레임 전체를 넘기던 경우: groups는 payload 안에 있음
   if (root && typeof root === "object" && !Array.isArray(root)) {
     const o = root as Record<string, unknown>;
     if (!Array.isArray(o.groups) && o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)) {
@@ -53,9 +52,22 @@ function extractGroups(data: unknown): CatalogGroup[] {
     .filter((g) => g.id);
 }
 
-function ToolsCatalogView({ data }: { data: unknown }) {
+function ToolsCatalogView({
+  data,
+  highlightToolId,
+  wsUrl,
+  token,
+}: {
+  data: unknown;
+  highlightToolId?: string | null;
+  wsUrl?: string;
+  token?: string;
+}) {
   const [search, setSearch] = useState("");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteMsg, setDeleteMsg] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const groups = extractGroups(data);
   const q = search.toLowerCase();
 
@@ -70,6 +82,40 @@ function ToolsCatalogView({ data }: { data: unknown }) {
 
   const totalTools = groups.reduce((s, g) => s + g.tools.length, 0);
 
+  useEffect(() => {
+    if (highlightToolId) {
+      const match = groups.find(
+        (g) => g.id === highlightToolId || g.pluginId === highlightToolId ||
+          g.tools.some((t) => t.id === highlightToolId)
+      );
+      if (match) {
+        setOpenGroup(match.id);
+        setTimeout(() => {
+          highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 100);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightToolId]);
+
+  const handleDelete = useCallback(async (group: CatalogGroup) => {
+    const pluginId = group.pluginId ?? group.id;
+    setDeletingId(group.id);
+    setDeleteMsg(null);
+    try {
+      const ws = (wsUrl ?? "").trim();
+      const tok = (token ?? "").trim();
+      const url = apiPath(`/api/policy/plugin-delete?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}&pluginId=${encodeURIComponent(pluginId)}`);
+      const res = await fetch(url, { method: "POST" });
+      const j = (await res.json()) as { ok?: boolean; message?: string };
+      setDeleteMsg({ id: group.id, ok: !!j.ok, text: j.message ?? (j.ok ? "삭제 완료" : "삭제 실패") });
+    } catch (e) {
+      setDeleteMsg({ id: group.id, ok: false, text: e instanceof Error ? e.message : "삭제 중 오류" });
+    } finally {
+      setDeletingId(null);
+    }
+  }, [wsUrl, token]);
+
   if (groups.length === 0) {
     return <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>도구 그룹을 찾을 수 없습니다.</p>;
   }
@@ -82,7 +128,7 @@ function ToolsCatalogView({ data }: { data: unknown }) {
         </span>
         <input
           className="policy-search"
-          placeholder="도구 이름 또는 설명 검색…"
+          placeholder="도구 이름 또는 설명으로 검색…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -94,22 +140,49 @@ function ToolsCatalogView({ data }: { data: unknown }) {
         {filteredGroups.map((g) => {
           const isOpen = openGroup === g.id;
           const isPlugin = g.source === "plugin";
+          const isHighlighted = highlightToolId !== null && highlightToolId !== undefined &&
+            (g.id === highlightToolId || g.pluginId === highlightToolId ||
+              g.tools.some((t) => t.id === highlightToolId));
+          const isDeleting = deletingId === g.id;
+          const msg = deleteMsg?.id === g.id ? deleteMsg : null;
+
           return (
-            <div key={g.id} className={`policy-tool-card${isPlugin ? " policy-tool-card-plugin" : ""}`}>
-              <button
-                type="button"
-                className="policy-tool-card-header"
-                onClick={() => setOpenGroup(isOpen ? null : g.id)}
-              >
-                <span className="policy-tool-name">{g.label}</span>
-                <span className={`policy-tool-source${isPlugin ? " policy-tool-source-plugin" : ""}`}>
-                  {isPlugin ? `플러그인: ${g.pluginId ?? g.label}` : g.source}
-                </span>
-                <span className="policy-tool-source" style={{ marginLeft: "auto" }}>
-                  {g.tools.length}개
-                </span>
-                <span className="policy-tool-chev">{isOpen ? "▲" : "▼"}</span>
-              </button>
+            <div
+              key={g.id}
+              ref={isHighlighted ? highlightRef : undefined}
+              className={`policy-tool-card${isPlugin ? " policy-tool-card-plugin" : ""}${isHighlighted ? " policy-tool-card-highlight" : ""}`}
+            >
+              <div className="policy-tool-card-header-row">
+                <button
+                  type="button"
+                  className="policy-tool-card-header"
+                  onClick={() => setOpenGroup(isOpen ? null : g.id)}
+                >
+                  <span className="policy-tool-name">{g.label}</span>
+                  <span className={`policy-tool-source${isPlugin ? " policy-tool-source-plugin" : ""}`}>
+                    {isPlugin ? `플러그인: ${g.pluginId ?? g.label}` : g.source}
+                  </span>
+                  <span className="policy-tool-source" style={{ marginLeft: "auto" }}>
+                    {g.tools.length}개
+                  </span>
+                  <span className="policy-tool-chev">{isOpen ? "▲" : "▼"}</span>
+                </button>
+                {isPlugin && (
+                  <button
+                    type="button"
+                    className="policy-plugin-delete-btn"
+                    disabled={isDeleting}
+                    onClick={() => void handleDelete(g)}
+                  >
+                    {isDeleting ? "삭제 중…" : "삭제"}
+                  </button>
+                )}
+              </div>
+              {msg && (
+                <p className={`policy-plugin-msg${msg.ok ? " policy-plugin-msg-ok" : " policy-plugin-msg-err"}`}>
+                  {msg.text}
+                </p>
+              )}
               {isOpen && (
                 <div className="policy-group-tools">
                   {g.tools.map((t) => (
@@ -233,6 +306,90 @@ type DiffResult = {
   tracePath: string;
 };
 
+// ── API Abuse 정책 (Rate Limit 설정) ─────────────────────────────────────
+
+type RateLimitPolicy = {
+  maxCalls: number;
+  windowSec: number;
+};
+
+function loadRateLimit(): RateLimitPolicy {
+  try {
+    const raw = localStorage.getItem("sg.policy.rateLimit");
+    if (raw) return JSON.parse(raw) as RateLimitPolicy;
+  } catch { /* ignore */ }
+  return { maxCalls: 10, windowSec: 30 };
+}
+
+function RateLimitSection({ highlightSection }: { highlightSection?: string | null }) {
+  const [policy, setPolicy] = useState<RateLimitPolicy>(loadRateLimit);
+  const [saved, setSaved] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (highlightSection === "rateLimit" && ref.current) {
+      ref.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current.classList.add("policy-rl-highlight");
+      const t = setTimeout(() => ref.current?.classList.remove("policy-rl-highlight"), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [highlightSection]);
+
+  const save = () => {
+    localStorage.setItem("sg.policy.rateLimit", JSON.stringify(policy));
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  return (
+    <div ref={ref} className="pl-check-card policy-rl-card" id="policy-rate-limit">
+      <div className="pl-check-card-header">
+        <span className="pl-check-num">04</span>
+        <div className="pl-check-info">
+          <span className="pl-check-title">API Abuse 탐지 정책</span>
+          <code className="pl-check-method">rate-limit</code>
+          <span className="pl-check-desc">도구 호출 횟수 초과 시 탐지합니다.</span>
+        </div>
+      </div>
+      <div className="policy-rl-body">
+        <div className="policy-rl-row">
+          <label className="policy-rl-label">최대 호출 횟수</label>
+          <input
+            type="number"
+            min={1}
+            max={1000}
+            className="policy-rl-input"
+            value={policy.maxCalls}
+            onChange={(e) => setPolicy((p) => ({ ...p, maxCalls: Number(e.target.value) }))}
+          />
+          <span className="policy-rl-unit">회</span>
+        </div>
+        <div className="policy-rl-row">
+          <label className="policy-rl-label">시간 범위</label>
+          <input
+            type="number"
+            min={1}
+            max={3600}
+            className="policy-rl-input"
+            value={policy.windowSec}
+            onChange={(e) => setPolicy((p) => ({ ...p, windowSec: Number(e.target.value) }))}
+          />
+          <span className="policy-rl-unit">초 내</span>
+        </div>
+        <div className="policy-rl-actions">
+          <button type="button" className="sc-btn-primary" onClick={save}>
+            저장
+          </button>
+          {saved && <span className="policy-rl-saved">✓ 저장되었습니다</span>}
+        </div>
+        <p className="policy-rl-hint">
+          현재 설정: {policy.windowSec}초 내 동일 도구 {policy.maxCalls}회 초과 시 탐지
+        </p>
+      </div>
+    </div>
+  );
+}
+
 // ── 메인 컴포넌트 ─────────────────────────────────────────────────────────
 
 export type StagePolicyProps = {
@@ -244,6 +401,10 @@ export type StagePolicyProps = {
   onRefreshCatalog: () => void;
   configBusy: boolean;
   catalogBusy: boolean;
+  highlightToolId?: string | null;
+  highlightSection?: string | null;
+  wsUrl?: string;
+  token?: string;
 };
 
 export function StagePolicy(props: StagePolicyProps) {
@@ -254,15 +415,19 @@ export function StagePolicy(props: StagePolicyProps) {
   const cfgBusy = props.configBusy;
   const catBusy = props.catalogBusy;
 
-  // diff state
   const [diff, setDiff] = useState<DiffResult | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState<string | null>(null);
 
-  // detail expanded
   const [cfgExpanded, setCfgExpanded] = useState(false);
   const [catExpanded, setCatExpanded] = useState(false);
   const [diffExpanded, setDiffExpanded] = useState(false);
+
+  useEffect(() => {
+    if (props.highlightSection === "catalog") {
+      setCatExpanded(true);
+    }
+  }, [props.highlightSection]);
 
   const loadDiff = useCallback(async () => {
     setDiffLoading(true);
@@ -279,8 +444,6 @@ export function StagePolicy(props: StagePolicyProps) {
       setDiffLoading(false);
     }
   }, []);
-
-  // ── 상태 계산 ──────────────────────────────────────────────────────────
 
   const configLoaded = cfg !== undefined && !cfgErr;
   const catalogLoaded = catalog !== undefined && !catErr;
@@ -308,8 +471,8 @@ export function StagePolicy(props: StagePolicyProps) {
       {/* ── 페이지 헤더 ── */}
       <div className="sc-page-header">
         <div className="sc-page-title-wrap">
-          <h2 className="sc-page-title">정책 검사</h2>
-          <p className="sc-page-desc">OpenClaw의 정책 설정과 도구 목록을 기준 상태와 비교하여 위험 변경 사항을 탐지합니다.</p>
+          <h2 className="sc-page-title">Policy</h2>
+          <p className="sc-page-desc">보안 정책 설정과 도구 목록을 검사하고 API Abuse 탐지 기준을 관리합니다.</p>
         </div>
         <div className="sc-status-bar">
           <div className="sc-status-item">
@@ -376,7 +539,7 @@ export function StagePolicy(props: StagePolicyProps) {
             <div className="pl-check-info">
               <span className="pl-check-title">도구 목록 검사</span>
               <code className="pl-check-method">tools.catalog</code>
-              <span className="pl-check-desc">현재 등록된 도구 목록을 확인합니다.</span>
+              <span className="pl-check-desc">현재 등록된 도구 목록을 확인합니다. 플러그인 도구는 삭제할 수 있습니다.</span>
             </div>
             <span className={`pl-chip ${catChipClass}`}>{catStatus}</span>
             <button
@@ -398,7 +561,14 @@ export function StagePolicy(props: StagePolicyProps) {
               >
                 {catExpanded ? "▲ 상세 접기" : "▼ 상세 보기"}
               </button>
-              {catExpanded && <ToolsCatalogView data={catalog} />}
+              {catExpanded && (
+                <ToolsCatalogView
+                  data={catalog}
+                  highlightToolId={props.highlightToolId}
+                  wsUrl={props.wsUrl}
+                  token={props.token}
+                />
+              )}
             </div>
           )}
         </div>
@@ -465,6 +635,9 @@ export function StagePolicy(props: StagePolicyProps) {
             </div>
           )}
         </div>
+
+        {/* 카드 4: API Abuse 탐지 정책 */}
+        <RateLimitSection highlightSection={props.highlightSection} />
 
       </div>
 

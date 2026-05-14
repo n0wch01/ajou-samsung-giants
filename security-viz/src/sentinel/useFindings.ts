@@ -25,7 +25,7 @@ function normalizeFindings(body: unknown): SentinelFinding[] {
 function findingsUrl(): string {
   const explicit = import.meta.env.VITE_SENTINEL_API_BASE;
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings`;
-  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings");
+  if (import.meta.env.DEV) return apiPath("/api/sentinel/findings");
   return apiPath("/findings");
 }
 
@@ -34,7 +34,7 @@ function sseUrl(): string {
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings/stream`;
   const fromEnv = import.meta.env.VITE_SENTINEL_SSE;
   if (fromEnv) return fromEnv;
-  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings/stream");
+  if (import.meta.env.DEV) return apiPath("/api/sentinel/findings/stream");
   return apiPath("/findings/stream");
 }
 
