@@ -321,12 +321,12 @@ button:disabled {
 }
 
 .cp-header {
-  padding: 12px 14px 10px;
+  padding: 24px 20px 20px;
   border-bottom: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
 }
 
 .cp-header-title {
@@ -366,9 +366,9 @@ button:disabled {
 
 /* 상태 카드 */
 .cp-status-card {
-  margin: 12px 12px 4px;
+  margin: 20px 16px 8px;
   border-radius: 8px;
-  padding: 12px 14px;
+  padding: 18px 20px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.02);
 }
@@ -445,10 +445,10 @@ button:disabled {
 
 /* 섹션 */
 .cp-section {
-  padding: 12px 12px 4px;
+  padding: 20px 16px 12px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 16px;
 }
 
 .cp-section-label {
@@ -464,8 +464,8 @@ button:disabled {
 /* 버튼 */
 .cp-btn-row {
   display: flex;
-  gap: 8px;
-  padding-bottom: 8px;
+  gap: 12px;
+  padding-bottom: 14px;
 }
 
 .cp-btn-connect,
@@ -4313,6 +4313,19 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 }
 
 .chat-detect-banner-close:hover { color: var(--text); }
+
+.chat-detect-banner-critical {
+  background: rgba(239,68,68,0.16);
+  border-color: rgba(239,68,68,0.5);
+}
+
+.chat-detect-banner-summary {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    POLICY — Plugin Delete Button + Rate Limit Section

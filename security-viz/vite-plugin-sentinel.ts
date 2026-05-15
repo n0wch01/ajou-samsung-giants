@@ -58,7 +58,7 @@ async function runPythonInWsl(
     // OPENCLAW_* / PYTHONPATH / PYTHONUTF8 등 필요한 키만 선택적으로 전달한다.
     const wslEnv: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
     for (const key of Object.keys(src)) {
-      if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "GUARDRAIL_ACTION" || key === "GUARDRAIL_TOOL_NAMES" || key === "CHECK_TOOL_NAMES" || key === "SENTINEL_AUTO_ABORT") {
+      if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "GUARDRAIL_ACTION" || key === "GUARDRAIL_TOOL_NAMES" || key === "CHECK_TOOL_NAMES" || key === "SENTINEL_AUTO_ABORT" || key === "POLICY_METHOD") {
         wslEnv[key] = src[key];
       }
     }
@@ -847,6 +847,61 @@ export function sentinelControlPlugin(): Plugin {
             }
           } catch (e) {
             sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
+        if (url === "/api/policy/plugin-delete" && req.method === "POST") {
+          const parsedUrl = new URL(req.url ?? "", "http://localhost");
+          const pluginId = String(parsedUrl.searchParams.get("pluginId") ?? "").trim();
+          if (!pluginId) {
+            sendJson(res, 400, { ok: false, message: "pluginId가 필요합니다." });
+            return;
+          }
+          const safeId = pluginId.replace(/[^a-zA-Z0-9_\-]/g, "");
+          if (!safeId) {
+            sendJson(res, 400, { ok: false, message: "유효하지 않은 pluginId입니다." });
+            return;
+          }
+          try {
+            if (process.platform === "win32") {
+              // 1) WSL 홈의 확장 디렉토리 삭제 (-lc: 로그인 셸로 HOME 확실히 설정)
+              await execFileAsync("wsl", ["bash", "-lc", `rm -rf ~/.openclaw/extensions/'${safeId}' 2>/dev/null; rm -rf ~/.openclaw/plugins/'${safeId}' 2>/dev/null; true`], { timeout: 15_000 });
+              // 2) openclaw.json 편집 — Windows FS 경로에서 직접 수정
+              const configPath = resolveOpenClawConfigPath();
+              if (fs.existsSync(configPath)) {
+                const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+                const pl = (cfg.plugins ?? {}) as Record<string, unknown>;
+                if (pl.entries && typeof pl.entries === "object") delete (pl.entries as Record<string, unknown>)[safeId];
+                if (pl.installs && typeof pl.installs === "object") delete (pl.installs as Record<string, unknown>)[safeId];
+                if (Array.isArray(pl.allow)) pl.allow = pl.allow.filter((v) => v !== safeId);
+                cfg.plugins = pl;
+                fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+              }
+            } else {
+              const extDir = path.join(os.homedir(), ".openclaw", "extensions", safeId);
+              if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+              const configPath = resolveOpenClawConfigPath();
+              if (fs.existsSync(configPath)) {
+                const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+                const pl = (cfg.plugins ?? {}) as Record<string, unknown>;
+                if (pl.entries && typeof pl.entries === "object") delete (pl.entries as Record<string, unknown>)[safeId];
+                if (pl.installs && typeof pl.installs === "object") delete (pl.installs as Record<string, unknown>)[safeId];
+                if (Array.isArray(pl.allow)) pl.allow = pl.allow.filter((v) => v !== safeId);
+                cfg.plugins = pl;
+                fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+              }
+            }
+            // 3) 게이트웨이 재시작
+            let restartStderr = "";
+            try {
+              await runOpenclaw(["gateway", "restart"], { cwd: REPO_ROOT, timeout: 90_000 });
+            } catch (re) {
+              restartStderr = re instanceof Error ? re.message : String(re);
+            }
+            sendJson(res, 200, { ok: true, pluginId: safeId, restartStderr });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: `제거 실패: ${e instanceof Error ? e.message : String(e)}` });
           }
           return;
         }

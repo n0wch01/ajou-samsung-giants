@@ -254,29 +254,6 @@ async def _run_ingest_once(
         )
         if worst_rank < auto_abort_min_rank:
             return
-        # Guardrail toggle: 플래그 파일이 존재하면 abort 스킵 (Direct 모드 시연).
-        # viz가 /api/sentinel/s3-guardrail POST로 토글한다.
-        guardrail_flag = trace_path.parent / "s3-guardrail-disabled.flag"
-        if guardrail_flag.exists():
-            abort_state["fired"] = True  # 더 이상 시도 안 하도록
-            triggered_by = [
-                {"ruleId": f.get("ruleId"), "severity": f.get("severity")}
-                for f in findings
-            ]
-            print(
-                f"[sentinel-ingest] AUTO-ABORT SKIPPED: guardrail disabled (flag={guardrail_flag.name}) "
-                f"— would have aborted by {len(findings)} finding(s)",
-                file=sys.stderr,
-            )
-            append_line({
-                "trace_version": 1,
-                "ts_ms": wall_time_ms(),
-                "entry_type": "meta",
-                "session_key": session_key,
-                "message": "auto-abort skipped: guardrail disabled (Direct 모드)",
-                "auto_abort": {"phase": "skipped", "reason": "guardrail_disabled", "findings": triggered_by},
-            })
-            return
         abort_state["fired"] = True
         triggered_by = [
             {"ruleId": f.get("ruleId"), "severity": f.get("severity")}
@@ -378,7 +355,9 @@ async def _run_ingest_once(
                 })
                 with open(realtime_path, "a", encoding="utf-8") as _rf:
                     _rf.write(json.dumps(f, ensure_ascii=False) + "\n")
-            asyncio.create_task(_maybe_auto_abort(findings))
+            # create_task 대신 await: 툴 호출 감지 즉시 abort RPC를 보내
+            # 다음 이벤트(툴 결과/에이전트 응답)가 오기 전에 세션을 끊는다.
+            await _maybe_auto_abort(findings)
 
     session.on_event(on_event)
 

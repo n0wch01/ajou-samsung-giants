@@ -428,15 +428,13 @@ class RealTimeRateDetector:
     """
     Live event-stream detector for ingest callbacks.
 
-    rate_limit / loop_detect 규칙만 처리한다. 배치 detect와 결과 형태는 동일하지만,
-    이벤트가 들어오는 즉시 finding을 반환해 respond 단의 sessions.abort 경로가
-    배치 주기를 기다리지 않게 해준다. 러너 wiring은 별도 PR에서 진행한다.
+    rate_limit / loop_detect 규칙을 처리한다.
 
     사용:
         rules = _load_yaml_rules(rules_dir)
         det = RealTimeRateDetector(rules)
-        for entry in stream:                 # entry == ingest._trace_record(...)
-            findings = det.process(entry)    # 임계 도달 시 비어 있지 않음
+        for entry in stream:
+            findings = det.process(entry)
     """
 
     def __init__(self, rules: list[dict[str, Any]]):
@@ -527,10 +525,6 @@ class RealTimeRateDetector:
                 )
 
         return out
-
-    def reset(self) -> None:
-        self._call_times.clear()
-        self._consecutive.clear()
 
 
 def run_detect(

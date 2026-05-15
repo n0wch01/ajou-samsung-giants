@@ -860,7 +860,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
   // 탐지 알림 배너
   const { findings } = useFindings({ pollMs: 1000, useSse: false });
   const prevFindingIds = useRef<Set<string>>(new Set());
-  const [newAlerts, setNewAlerts] = useState<Array<{ id: string; label: string; findingId: string }>>([]);
+  const [newAlerts, setNewAlerts] = useState<Array<{ id: string; label: string; findingId: string; message: string; severity: string }>>([]);
 
   useEffect(() => {
     const currentIds = new Set(findings.map((f) => f.id));
@@ -872,6 +872,8 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
           id: f.id,
           label: detectCategoryLabel(f.ruleId),
           findingId: f.id,
+          message: f.message,
+          severity: f.severity,
         })),
       ]);
     }
@@ -1015,10 +1017,11 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
       {newAlerts.length > 0 && (
         <div className="chat-detect-banners">
           {newAlerts.map((alert) => (
-            <div key={alert.id} className="chat-detect-banner">
+            <div key={alert.id} className={`chat-detect-banner${alert.severity === "critical" || alert.severity === "high" ? " chat-detect-banner-critical" : ""}`}>
               <span className="chat-detect-banner-icon">⚠</span>
               <span className="chat-detect-banner-text">
-                <strong>{alert.label}</strong> 탐지로 인해 세션이 중지되었습니다
+                <strong>{alert.label}</strong> 탐지 — 세션이 차단되었습니다
+                {alert.message ? <span className="chat-detect-banner-summary">{alert.message}</span> : null}
               </span>
               {props.onNavigate && (
                 <button

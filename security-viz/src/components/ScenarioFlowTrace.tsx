@@ -1360,8 +1360,9 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
               </div>
             )}
 
-            {/* ── 2행: 최종 툴 출력 → 에이전트 응답 ── */}
-            {(turn.tools.length > 0 && turn.toolStatus !== "pending") || turn.responseStatus !== "pending" ? (
+            {/* ── 2행: 최종 툴 출력 → 에이전트 응답 (S1 차단 시 숨김) ── */}
+            {((turn.tools.length > 0 && turn.toolStatus !== "pending") || turn.responseStatus !== "pending") &&
+            !(scenarioId === "S1" && turn.hasPluginTool) ? (
               <div className="ft-row ft-row-second">
                 {turn.tools.length > 0 && turn.toolStatus !== "pending" && (
                   <>
