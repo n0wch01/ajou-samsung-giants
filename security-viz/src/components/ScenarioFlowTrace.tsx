@@ -715,6 +715,13 @@ function ToolBlock({ tool }: { tool: ParsedTool }) {
         {tool.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
         {!showOut && <span className="ft-badge-running">실행 중…</span>}
       </div>
+      {tool.isMalicious && (
+        <div className="ft-detection-reason">
+          <span className="ft-detection-arrow">└─</span>
+          <span className="ft-detection-label">탐지 근거</span>
+          <span className="ft-detection-text">베이스라인에 없는 도구 — {tool.name}</span>
+        </div>
+      )}
       {hasArgs ? (
         <ScenarioToolBodyToggle
           label="입력 인자"
@@ -793,6 +800,14 @@ function FinalToolOutputBlock({ t }: { t: ParsedTool }) {
         <code className="ft-code ft-scenario-tool-name">{t.name}</code>
         {t.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
       </div>
+
+      {t.isMalicious && (
+        <div className="ft-detection-reason">
+          <span className="ft-detection-arrow">└─</span>
+          <span className="ft-detection-label">탐지 근거</span>
+          <span className="ft-detection-text">베이스라인에 없는 도구 — {t.name}</span>
+        </div>
+      )}
 
       <AnomalySection t={t} />
 
@@ -1301,6 +1316,17 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
             />
 
             <ExfilLogPanel log={exfil.log} />
+
+            {/* ── S1 차단 이벤트 ── */}
+            {scenarioId === "S1" && turn.hasPluginTool && turn.toolStatus !== "pending" && (
+              <div className="ft-block-event">
+                <div className="ft-block-event-header">
+                  <span className="ft-block-event-icon">⛔</span>
+                  <span className="ft-block-event-title">차단 이벤트 — 세션 종료</span>
+                </div>
+                <p className="ft-block-event-desc">비승인 플러그인 호출이 감지되어 에이전트를 차단했습니다</p>
+              </div>
+            )}
 
             {/* ── 2행: 최종 툴 출력 → 에이전트 응답 ── */}
             {(turn.tools.length > 0 && turn.toolStatus !== "pending") || turn.responseStatus !== "pending" ? (

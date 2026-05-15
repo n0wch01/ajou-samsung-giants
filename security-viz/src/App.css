@@ -3475,6 +3475,72 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   color: var(--text);
 }
 
+/* ── ft-detection-reason (탐지 근거 행) ──────────────────────────── */
+.ft-detection-reason {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 6px;
+  background: rgba(239, 68, 68, 0.06);
+  border-top: 1px solid rgba(239, 68, 68, 0.15);
+  font-size: 0.74rem;
+}
+
+.ft-detection-arrow {
+  color: var(--danger);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.ft-detection-label {
+  color: var(--muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ft-detection-text {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+/* ── ft-block-event (차단 이벤트 카드) ──────────────────────────── */
+.ft-block-event {
+  margin: 12px 0 4px;
+  border: 1.5px solid rgba(239, 68, 68, 0.5);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.07);
+  overflow: hidden;
+  animation: ft-intercept-appear 0.25s ease;
+}
+
+.ft-block-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: rgba(239, 68, 68, 0.13);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.ft-block-event-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.ft-block-event-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--danger);
+  letter-spacing: 0.02em;
+}
+
+.ft-block-event-desc {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+
 /* S2 Data Leakage panel — scenario tab embed */
 .scenario-tab-panel {
   display: flex;
