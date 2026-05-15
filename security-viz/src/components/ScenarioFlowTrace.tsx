@@ -1395,16 +1395,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
               </div>
             ) : null}
 
-            {/* ── S1 차단 이벤트 (④⑤ 이후) ── */}
-            {scenarioId === "S1" && turn.hasPluginTool && turn.toolStatus !== "pending" && (
-              <div className="ft-block-event">
-                <div className="ft-block-event-header">
-                  <span className="ft-block-event-icon">⛔</span>
-                  <span className="ft-block-event-title">차단 이벤트 — 세션 종료</span>
-                </div>
-                <p className="ft-block-event-desc">비승인 플러그인 호출이 감지되어 에이전트를 차단했습니다</p>
-              </div>
-            )}
+
           </>
         )}
       </div>
