@@ -148,7 +148,7 @@ export function StageScenario(props: StageScenarioProps) {
       return;
     }
 
-    if (entry.id === "S1" || entry.id === "S3") {
+    if (entry.id === "S3") {
       showHint(`${entry.id}: Sentinel 재시작 중 (trace 초기화 + auto-abort 활성화)…`, "info");
       try {
         await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
