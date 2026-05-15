@@ -713,14 +713,13 @@ function ToolBlock({ tool }: { tool: ParsedTool }) {
       <div className="ft-scenario-tool-head">
         <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : tool.isApprovedPlugin ? "🟢" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{tool.name}</code>
-        {tool.isMalicious && <span className="ft-badge-danger">⚠ 비승인 플러그인</span>}
         {tool.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
         {!showOut && <span className="ft-badge-running">실행 중…</span>}
       </div>
       {tool.isMalicious && (
         <div className="ft-detection-reason">
           <span className="ft-detection-arrow">└─</span>
-          <span className="ft-detection-label">탐지 근거</span>
+          <span className="ft-detection-label">비승인 플러그인 탐지</span>
           <span className="ft-detection-text">베이스라인에 없는 도구 — {tool.name}</span>
         </div>
       )}
@@ -800,13 +799,12 @@ function FinalToolOutputBlock({ t }: { t: ParsedTool }) {
       <div className="ft-scenario-tool-head">
         <span className="ft-tool-icon">{t.isMalicious ? "🔴" : t.isApprovedPlugin ? "🟢" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{t.name}</code>
-        {t.isMalicious && <span className="ft-badge-danger">⚠ 비승인 플러그인</span>}
         {t.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
       </div>
       {t.isMalicious && (
         <div className="ft-detection-reason">
           <span className="ft-detection-arrow">└─</span>
-          <span className="ft-detection-label">탐지 근거</span>
+          <span className="ft-detection-label">비승인 플러그인 탐지</span>
           <span className="ft-detection-text">베이스라인에 없는 도구 — {t.name}</span>
         </div>
       )}
