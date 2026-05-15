@@ -16,10 +16,33 @@ function categorize(f: SentinelFinding): DetectCategory {
 }
 
 function categoryLabel(cat: DetectCategory): string {
-  if (cat === "plugin") return "악성 플러그인 탐지";
+  if (cat === "plugin") return "플러그인 탐지";
   if (cat === "md") return "악성 MD 탐지";
   if (cat === "abuse") return "API Abuse 탐지";
   return "기타 탐지";
+}
+
+function pluginApprovalLabel(
+  finding: SentinelFinding,
+  approvalMap: Record<string, boolean>,
+  allowedPlugins: string[],
+): string {
+  const text = `${finding.message} ${finding.title}`.toLowerCase();
+
+  // tool 이름(ex. ai_image_gen) → 승인 맵 조회
+  const toolMatches = text.match(/\b([a-z][a-z0-9]*_[a-z][a-z0-9_]*)\b/g) ?? [];
+  for (const tool of toolMatches) {
+    if (tool in approvalMap) {
+      return approvalMap[tool] ? "승인 플러그인 탐지" : "비승인 플러그인 탐지";
+    }
+  }
+
+  // plugin ID(ex. ai-image-toolkit) 가 텍스트에 직접 언급된 경우
+  for (const pluginId of allowedPlugins) {
+    if (text.includes(pluginId.toLowerCase())) return "승인 플러그인 탐지";
+  }
+
+  return "플러그인 탐지";
 }
 
 // ── 도넛 차트 (SVG) ───────────────────────────────────────────────────────
@@ -202,6 +225,8 @@ function HistoryItem({
   isOpen,
   isHighlighted,
   timeline,
+  pluginApprovalMap,
+  allowedPlugins,
   onToggle,
   onNavigate,
 }: {
@@ -209,11 +234,16 @@ function HistoryItem({
   isOpen: boolean;
   isHighlighted: boolean;
   timeline: TimelineEntry[];
+  pluginApprovalMap: Record<string, boolean>;
+  allowedPlugins: string[];
   onToggle: () => void;
   onNavigate: (a: NavAction) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const category = categorize(finding);
+  const label = category === "plugin"
+    ? pluginApprovalLabel(finding, pluginApprovalMap, allowedPlugins)
+    : categoryLabel(category);
 
   useEffect(() => {
     if (isHighlighted && ref.current) {
@@ -228,7 +258,7 @@ function HistoryItem({
     >
       <button type="button" className="mon-history-row" onClick={onToggle}>
         <SevBadge sev={finding.severity} />
-        <span className={`mon-history-cat mon-history-cat-${category}`}>{categoryLabel(category)}</span>
+        <span className={`mon-history-cat mon-history-cat-${category}`}>{label}</span>
         <span className="mon-history-title">{finding.title}</span>
         <span className="mon-history-rule">{finding.ruleId}</span>
         <span className="mon-history-ts">
@@ -272,7 +302,7 @@ export type StageMonitoringProps = {
 };
 
 export function StageMonitoring({ timeline, highlightFindingId, onNavigate }: StageMonitoringProps) {
-  const { findings, error } = useFindings({ pollMs: 1000, useSse: false });
+  const { findings, pluginApprovalMap, allowedPlugins, error } = useFindings({ pollMs: 1000, useSse: false });
   const [openId, setOpenId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -355,6 +385,8 @@ export function StageMonitoring({ timeline, highlightFindingId, onNavigate }: St
               isOpen={openId === f.id}
               isHighlighted={highlightFindingId === f.id}
               timeline={timeline}
+              pluginApprovalMap={pluginApprovalMap}
+              allowedPlugins={allowedPlugins}
               onToggle={() => setOpenId((prev) => (prev === f.id ? null : f.id))}
               onNavigate={onNavigate}
             />

@@ -4,32 +4,26 @@ import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
-import { StageMonitoring } from "./panels/StageMonitoring";
+import { StageSentinelDetect } from "./panels/StageSentinelDetect";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario";
-
-export type NavAction = {
-  tab: AppMainTab;
-  highlightFindingId?: string | null;
-  highlightToolId?: string | null;
-  highlightSection?: string | null;
-};
+export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
 
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
-  const [highlightFindingId, setHighlightFindingId] = useState<string | null>(null);
-  const [highlightToolId, setHighlightToolId] = useState<string | null>(null);
-  const [highlightSection, setHighlightSection] = useState<string | null>(null);
-
   const [wsUrl, setWsUrl] = useState(
     () =>
       (import.meta.env.VITE_SG_GATEWAY_WS_URL as string | undefined)?.trim() ||
       localStorage.getItem("sg.viz.wsUrl") ||
       "",
   );
-  const [token, setToken] = useState(() => localStorage.getItem("sg.viz.token") ?? "");
+  const [token, setToken] = useState(
+    () =>
+      (import.meta.env.VITE_SG_GATEWAY_TOKEN as string | undefined)?.trim() ||
+      localStorage.getItem("sg.viz.token") ||
+      "",
+  );
   const [sessionKey, setSessionKey] = useState(() => {
     const env = (import.meta.env.VITE_SG_SESSION_KEY as string | undefined)?.trim();
     if (env) return env;
@@ -44,13 +38,6 @@ export function App() {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [configBusy, setConfigBusy] = useState(false);
   const [catalogBusy, setCatalogBusy] = useState(false);
-
-  const navigate = useCallback((action: NavAction) => {
-    setTab(action.tab);
-    setHighlightFindingId(action.highlightFindingId ?? null);
-    setHighlightToolId(action.highlightToolId ?? null);
-    setHighlightSection(action.highlightSection ?? null);
-  }, []);
 
   const onConnect = useCallback(() => {
     localStorage.setItem("sg.viz.wsUrl", wsUrl);
@@ -110,36 +97,36 @@ export function App() {
                 role="tab"
                 aria-selected={tab === "chat"}
                 className={tab === "chat" ? "app-tab active" : "app-tab"}
-                onClick={() => navigate({ tab: "chat" })}
+                onClick={() => setTab("chat")}
               >
-                Chat
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "monitoring"}
-                className={tab === "monitoring" ? "app-tab active" : "app-tab"}
-                onClick={() => navigate({ tab: "monitoring" })}
-              >
-                Monitoring
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "policy"}
-                className={tab === "policy" ? "app-tab active" : "app-tab"}
-                onClick={() => navigate({ tab: "policy" })}
-              >
-                Policy
+                채팅
               </button>
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === "scenario"}
                 className={tab === "scenario" ? "app-tab active" : "app-tab"}
-                onClick={() => navigate({ tab: "scenario" })}
+                onClick={() => setTab("scenario")}
               >
-                Test Scenario
+                시나리오 실행
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "policy"}
+                className={tab === "policy" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("policy")}
+              >
+                정책 검사
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "detect"}
+                className={tab === "detect" ? "app-tab active" : "app-tab"}
+                onClick={() => setTab("detect")}
+              >
+                Sentinel 탐지
               </button>
             </nav>
           </div>
@@ -171,16 +158,11 @@ export function App() {
               token={token}
               sessionKey={sessionKey}
               injectFrame={gw.injectFrame}
-              onNavigate={navigate}
             />
           </section>
 
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "monitoring"}>
-            <StageMonitoring
-              timeline={gw.timeline}
-              highlightFindingId={highlightFindingId}
-              onNavigate={navigate}
-            />
+          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
+            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
@@ -193,16 +175,13 @@ export function App() {
               onRefreshCatalog={() => void onRefreshCatalog()}
               configBusy={configBusy}
               catalogBusy={catalogBusy}
-              highlightToolId={highlightToolId}
-              highlightSection={highlightSection}
-              wsUrl={wsUrl}
-              token={token}
             />
           </section>
 
-          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
+          <section className="tab-panel" role="tabpanel" hidden={tab !== "detect"}>
+            <StageSentinelDetect wsUrl={wsUrl} token={token} />
           </section>
+
         </main>
       </div>
     </div>

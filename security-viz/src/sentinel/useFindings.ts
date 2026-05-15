@@ -25,7 +25,7 @@ function normalizeFindings(body: unknown): SentinelFinding[] {
 function findingsUrl(): string {
   const explicit = import.meta.env.VITE_SENTINEL_API_BASE;
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings`;
-  if (import.meta.env.DEV) return apiPath("/api/sentinel/findings");
+  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings");
   return apiPath("/findings");
 }
 
@@ -34,12 +34,30 @@ function sseUrl(): string {
   if (explicit) return `${explicit.replace(/\/$/, "")}/findings/stream`;
   const fromEnv = import.meta.env.VITE_SENTINEL_SSE;
   if (fromEnv) return fromEnv;
-  if (import.meta.env.DEV) return apiPath("/api/sentinel/findings/stream");
+  if (import.meta.env.DEV) return apiPath("/sentinel-api/findings/stream");
   return apiPath("/findings/stream");
+}
+
+function extractPluginApprovalMap(body: unknown): Record<string, boolean> {
+  if (body && typeof body === "object") {
+    const m = (body as { pluginApprovalMap?: unknown }).pluginApprovalMap;
+    if (m && typeof m === "object" && !Array.isArray(m)) return m as Record<string, boolean>;
+  }
+  return {};
+}
+
+function extractAllowedPlugins(body: unknown): string[] {
+  if (body && typeof body === "object") {
+    const list = (body as { allowedPlugins?: unknown }).allowedPlugins;
+    if (Array.isArray(list)) return list.filter((v): v is string => typeof v === "string");
+  }
+  return [];
 }
 
 export function useFindings(opts: { pollMs: number; useSse: boolean }) {
   const [findings, setFindings] = useState<SentinelFinding[]>([]);
+  const [pluginApprovalMap, setPluginApprovalMap] = useState<Record<string, boolean>>({});
+  const [allowedPlugins, setAllowedPlugins] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const esRef = useRef<EventSource | null>(null);
@@ -54,6 +72,8 @@ export function useFindings(opts: { pollMs: number; useSse: boolean }) {
       }
       const data: unknown = await res.json();
       setFindings(normalizeFindings(data));
+      setPluginApprovalMap(extractPluginApprovalMap(data));
+      setAllowedPlugins(extractAllowedPlugins(data));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -114,7 +134,7 @@ export function useFindings(opts: { pollMs: number; useSse: boolean }) {
     return () => window.clearInterval(t);
   }, [opts.pollMs, opts.useSse, pull]);
 
-  return { findings, error, loading, refresh: pull };
+  return { findings, pluginApprovalMap, allowedPlugins, error, loading, refresh: pull };
 }
 
 function mergeById(prev: SentinelFinding[], next: SentinelFinding[]): SentinelFinding[] {

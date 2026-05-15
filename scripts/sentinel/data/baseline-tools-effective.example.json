@@ -11,6 +11,7 @@
     "cron", "gateway",
     "nodes",
     "agents_list", "update_plan",
-    "image", "image_generate", "music_generate", "video_generate", "tts"
+    "image", "image_generate", "music_generate", "video_generate", "tts",
+    "safe_search", "safe_format"
   ]
 }

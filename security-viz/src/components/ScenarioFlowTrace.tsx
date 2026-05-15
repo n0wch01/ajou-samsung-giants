@@ -53,7 +53,7 @@ type S3Verdict = {
   };
 };
 
-const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check"]);
+const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
 
 // ── 이상 행동 감지 ─────────────────────────────────────────
 
@@ -71,11 +71,13 @@ const SUSPICIOUS_PATTERNS: Array<{ re: RegExp; label: string; category: AnomalyF
 const TOOL_CLAIMED_DESC: Record<string, string> = {
   ai_image_gen:    "이미지 생성 + 자동 클라우드 저장",
   ai_model_check:  "AI 모델 상태 확인",
+  ai_image_upload: "이미지 업로드",
 };
 
 const TOOL_EXPECTED_KEYWORDS: Record<string, string[]> = {
   ai_image_gen:    ["image", "이미지", "url", "base64", "generated", "width", "height"],
   ai_model_check:  ["status", "model", "version", "ok", "healthy"],
+  ai_image_upload: ["upload", "uploaded", "url", "path"],
 };
 
 function detectAnomalies(_toolName: string, output: string): AnomalyFinding[] {
@@ -108,6 +110,7 @@ type ParsedTool = {
   displayOutput: string;
   toolCallId: string;
   isMalicious: boolean;
+  isApprovedPlugin: boolean;
   hasResult: boolean;
   anomalies: AnomalyFinding[];
   claimedDesc: string;
@@ -498,7 +501,7 @@ function enrichToolDisplayOutputs(
 
 // ── 턴 파싱 ───────────────────────────────────────────────
 
-function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
+function getLastScenarioTurn(entries: TimelineEntry[], approvalMap: Record<string, boolean>): ScenarioTurn | null {
   // 마지막 사용자 메시지 위치
   let lastUserIdx = -1;
   for (let i = entries.length - 1; i >= 0; i--) {
@@ -570,13 +573,16 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
         const existing = seenMerge.get(mergeKey)!;
         if (isGenericToolName(existing.name) && !isGenericToolName(name)) {
           existing.name = name;
-          existing.isMalicious = PLUGIN_TOOLS.has(name);
+          const hasMap = Object.keys(approvalMap).length > 0;
+          existing.isMalicious = hasMap ? approvalMap[name] === false : PLUGIN_TOOLS.has(name);
+          existing.isApprovedPlugin = hasMap ? approvalMap[name] === true : false;
         }
         if (args.trim() && !existing.args.trim()) existing.args = args;
         if (output.length > existing.output.length) existing.output = output;
         if (output.length > existing.displayOutput.length) existing.displayOutput = output;
         if (hasResult) existing.hasResult = true;
       } else {
+        const _hasMap = Object.keys(approvalMap).length > 0;
         const tool: ParsedTool = {
           id: `tool-${_seq++}`,
           name,
@@ -584,7 +590,8 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
           output,
           displayOutput: output,
           toolCallId: callId,
-          isMalicious: PLUGIN_TOOLS.has(name),
+          isMalicious: _hasMap ? approvalMap[name] === false : PLUGIN_TOOLS.has(name),
+          isApprovedPlugin: _hasMap ? approvalMap[name] === true : false,
           hasResult,
           anomalies: [],
           claimedDesc: TOOL_CLAIMED_DESC[name] ?? "",
@@ -708,11 +715,12 @@ function ToolBlock({ tool }: { tool: ParsedTool }) {
   const [argsOpen, setArgsOpen] = useState(false);
 
   return (
-    <div className={`ft-scenario-tool-card${tool.isMalicious ? " ft-scenario-tool-card-danger" : ""}`}>
+    <div className={`ft-scenario-tool-card${tool.isMalicious ? " ft-scenario-tool-card-danger" : tool.isApprovedPlugin ? " ft-scenario-tool-card-approved" : ""}`}>
       <div className="ft-scenario-tool-head">
-        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : "🔧"}</span>
+        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : tool.isApprovedPlugin ? "🟢" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{tool.name}</code>
-        {tool.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
+        {tool.isMalicious && <span className="ft-badge-danger">⚠ 비승인 플러그인</span>}
+        {tool.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
         {!showOut && <span className="ft-badge-running">실행 중…</span>}
       </div>
       {tool.isMalicious && (
@@ -794,13 +802,13 @@ function FinalToolOutputBlock({ t }: { t: ParsedTool }) {
   const body = t.displayOutput.trim() || t.output.trim();
   const [outOpen, setOutOpen] = useState(false);
   return (
-    <div className={`ft-scenario-tool-card${t.isMalicious ? " ft-scenario-tool-card-danger" : ""}`}>
+    <div className={`ft-scenario-tool-card${t.isMalicious ? " ft-scenario-tool-card-danger" : t.isApprovedPlugin ? " ft-scenario-tool-card-approved" : ""}`}>
       <div className="ft-scenario-tool-head">
-        <span className="ft-tool-icon">{t.isMalicious ? "🔴" : "🔧"}</span>
+        <span className="ft-tool-icon">{t.isMalicious ? "🔴" : t.isApprovedPlugin ? "🟢" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{t.name}</code>
-        {t.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
+        {t.isMalicious && <span className="ft-badge-danger">⚠ 비승인 플러그인</span>}
+        {t.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
       </div>
-
       {t.isMalicious && (
         <div className="ft-detection-reason">
           <span className="ft-detection-arrow">└─</span>
@@ -833,12 +841,11 @@ type StepProps = {
   status: StepStatus;
   badge?: React.ReactNode;
   children: React.ReactNode;
-  className?: string;
 };
 
-function Step({ num, label, status, badge, children, className }: StepProps) {
+function Step({ num, label, status, badge, children }: StepProps) {
   return (
-    <div className={["ft-step", `ft-step-${status}`, className].filter(Boolean).join(" ")}>
+    <div className={`ft-step ft-step-${status}`}>
       <div className="ft-step-header">
         <StatusDot status={status} />
         <span className="ft-step-num">{num}</span>
@@ -890,6 +897,7 @@ function RealtimeInterceptBanner({
         <div className="ft-intercept-header">
           <span className="ft-intercept-icon">🛡</span>
           <span className="ft-intercept-title">Sentinel 실시간 인터셉트</span>
+          <span className="ft-intercept-sub">툴 결과 수신 즉시 탐지됨</span>
         </div>
 
         {hasAnomaly && (
@@ -1129,11 +1137,29 @@ function ExfilLogPanel({ log }: ExfilLogState) {
 
 // ─────────────────────────────────────────────────────────────
 
+function usePluginApprovalMap(): Record<string, boolean> {
+  const [map, setMap] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(apiPath("/api/sentinel/findings"))
+      .then((r) => r.json())
+      .then((j: { pluginApprovalMap?: Record<string, boolean> }) => {
+        if (!cancelled && j.pluginApprovalMap && typeof j.pluginApprovalMap === "object") {
+          setMap(j.pluginApprovalMap);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  return map;
+}
+
 export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioFlowTraceProps) {
-  const turn = useMemo(() => getLastScenarioTurn(entries), [entries]);
+  const pluginApprovalMap = usePluginApprovalMap();
+  const turn = useMemo(() => getLastScenarioTurn(entries, pluginApprovalMap), [entries, pluginApprovalMap]);
 
   const hasPluginTool = turn?.hasPluginTool ?? false;
-  const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3", turn?.at);
+  const rtFindings = useRealtimeFindings(hasPluginTool, turn?.at);
   const exfil = useExfilLog(hasPluginTool, turn?.at);
   // Vite 개발 서버에서만 게이트 API가 있음. turn 에 묶지 않음 — 타임라인 파싱 전에도 대기 건 표시.
   const fetchGate = useFetchGatePending(import.meta.env.DEV, turn?.at);
@@ -1194,6 +1220,9 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {scenarioId === "S1" && turn?.s1Verdict === "success" && (
           <span className="ft-badge-success">S1 성공</span>
         )}
+        {scenarioId === "S1" && turn?.s1Verdict === "fail" && (
+          <span className="ft-badge-fail">S1 실패</span>
+        )}
         {scenarioId === "S3" && s3 && s3.verdict === "blocked" && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 BLOCKED
@@ -1205,7 +1234,10 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
           </span>
         )}
         {scenarioId === "S2" && turn?.s2Verdict === "success" && (
-          <span className="ft-badge-success">S2 성공</span>
+          <span className="ft-badge-success">S2 성공 (데이터 유출)</span>
+        )}
+        {scenarioId === "S2" && turn?.s2Verdict === "fail" && (
+          <span className="ft-badge-fail">S2 실패 (주입 미동작)</span>
         )}
       </div>
 
@@ -1258,7 +1290,15 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
                         {turn.toolNames.map((name) => (
                           <span
                             key={name}
-                            className={`ft-tool-ref${PLUGIN_TOOLS.has(name) ? " ft-tool-ref-danger" : ""}`}
+                            className={`ft-tool-ref${
+                              Object.keys(pluginApprovalMap).length > 0
+                                ? pluginApprovalMap[name] === false
+                                  ? " ft-tool-ref-danger"
+                                  : pluginApprovalMap[name] === true
+                                  ? " ft-tool-ref-approved"
+                                  : ""
+                                : PLUGIN_TOOLS.has(name) ? " ft-tool-ref-danger" : ""
+                            }`}
                           >
                             {name}
                           </span>
@@ -1283,7 +1323,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
                     status={turn.toolStatus}
                     badge={
                       turn.hasPluginTool ? (
-                        <span className="ft-badge-danger">플러그인 툴 감지</span>
+                        <span className="ft-badge-danger">비승인 플러그인 툴 감지</span>
                       ) : null
                     }
                   >
@@ -1340,7 +1380,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
                       status={turn.toolStatus}
                       badge={
                         turn.hasPluginTool ? (
-                          <span className="ft-badge-danger">플러그인 툴 감지</span>
+                          <span className="ft-badge-danger">비승인 플러그인 툴 감지</span>
                         ) : null
                       }
                     >
@@ -1354,7 +1394,6 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
 
                 {/* ⑤ 에이전트 최종 응답 */}
                 <Step
-                  className="ft-step-agent-final"
                   num={turn.tools.length > 0 && turn.toolStatus !== "pending" ? "⑤" : "④"}
                   label="에이전트 최종 응답"
                   status={turn.responseStatus}
