@@ -432,7 +432,11 @@ export function StagePolicy(props: StagePolicyProps) {
     setDiffLoading(true);
     setDiffError(null);
     try {
-      const res = await fetch(apiPath("/api/sentinel/tools-diff"));
+      const params = new URLSearchParams();
+      if (props.wsUrl) params.set("wsUrl", props.wsUrl);
+      if (props.token) params.set("token", props.token);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(apiPath(`/api/sentinel/tools-diff${qs}`));
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       const data = (await res.json()) as DiffResult & { ok?: boolean };
       setDiff(data);
@@ -442,7 +446,7 @@ export function StagePolicy(props: StagePolicyProps) {
     } finally {
       setDiffLoading(false);
     }
-  }, []);
+  }, [props.wsUrl, props.token]);
 
   const configLoaded = cfg !== undefined && !cfgErr;
   const catalogLoaded = catalog !== undefined && !catErr;

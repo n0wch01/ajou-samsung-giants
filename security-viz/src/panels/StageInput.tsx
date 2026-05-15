@@ -39,8 +39,9 @@ export function StageInput(props: StageInputProps) {
     <div className="cp-panel">
       {/* 패널 헤더 */}
       <div className="cp-header">
-        <span className="cp-header-title">Connection Panel</span>
-        <span className="cp-header-sub">AI Agent</span>
+        <span className="cp-header-title">Gateway 연결</span>
+        <span className="cp-header-sub">AI Agent Monitor</span>
+        <span className="cp-header-desc">AI 에이전트의 활동을 실시간으로 모니터링하기 위한 연결 설정입니다.</span>
       </div>
 
       {/* 상태 카드 */}
@@ -65,6 +66,7 @@ export function StageInput(props: StageInputProps) {
             placeholder="ws://127.0.0.1:18789"
             autoComplete="off"
           />
+          <span className="cp-field-hint">게이트웨이 서버 주소입니다. 로컬 실행 시 기본값을 사용하세요.</span>
         </div>
         <div className="field">
           <label htmlFor="sess">Session Key</label>
@@ -75,6 +77,7 @@ export function StageInput(props: StageInputProps) {
             placeholder="agent:main"
             autoComplete="off"
           />
+          <span className="cp-field-hint">모니터링할 에이전트 세션 이름입니다.</span>
         </div>
         <div className="field">
           <label htmlFor="tok">Gateway Token</label>
@@ -86,12 +89,14 @@ export function StageInput(props: StageInputProps) {
             placeholder="operator token"
             autoComplete="off"
           />
+          <span className="cp-field-hint">게이트웨이 접근 인증 토큰입니다. 관리자로부터 발급받아 입력하세요.</span>
         </div>
       </div>
 
       {/* 액션 버튼 */}
       <div className="cp-section">
         <span className="cp-section-label">Actions</span>
+        <p className="cp-action-desc">연결하면 에이전트의 도구 호출과 보안 이벤트를 실시간으로 확인할 수 있습니다.</p>
         <div className="cp-btn-row">
           <button className="cp-btn-connect" type="button" disabled={busy} onClick={props.onConnect}>
             {busy ? "Connecting…" : "Connect"}

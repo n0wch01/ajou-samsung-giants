@@ -343,6 +343,27 @@ button:disabled {
   color: var(--text);
 }
 
+.cp-header-desc {
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.cp-field-hint {
+  font-size: 0.62rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.cp-action-desc {
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 0 0 6px;
+}
+
 /* 상태 카드 */
 .cp-status-card {
   margin: 12px 12px 4px;
@@ -2645,6 +2666,16 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   50% { opacity: 0.5; }
 }
 
+.ft-badge-approved {
+  font-size: 0.67rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(16,185,129,0.14);
+  color: var(--ok);
+  border: 1px solid rgba(16,185,129,0.35);
+}
+
 .ft-badge-danger {
   font-size: 0.67rem;
   font-weight: 700;
@@ -2906,6 +2937,11 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   color: var(--danger);
 }
 
+.ft-tool-ref-approved {
+  background: rgba(16,185,129,0.1);
+  color: var(--ok);
+}
+
 /* ③ 툴 실행 / ④ 최종 툴 출력 — 동일 카드 셸 */
 .ft-scenario-tool-card {
   width: 100%;
@@ -2927,6 +2963,77 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 
 .ft-scenario-tool-card-danger .ft-scenario-tool-head {
   background: rgba(232, 67, 90, 0.07);
+}
+
+.ft-scenario-tool-card-approved {
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.ft-scenario-tool-card-approved .ft-scenario-tool-head {
+  background: rgba(16, 185, 129, 0.06);
+}
+
+.ft-detection-reason {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 6px;
+  background: rgba(239, 68, 68, 0.06);
+  border-top: 1px solid rgba(239, 68, 68, 0.15);
+  font-size: 0.74rem;
+}
+
+.ft-detection-arrow {
+  color: var(--danger);
+  font-family: monospace;
+  flex-shrink: 0;
+}
+
+.ft-detection-label {
+  color: var(--muted);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.ft-detection-text {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.ft-block-event {
+  margin: 12px 0 4px;
+  border: 1.5px solid rgba(239, 68, 68, 0.5);
+  border-radius: 8px;
+  background: rgba(239, 68, 68, 0.07);
+  overflow: hidden;
+  animation: ft-intercept-appear 0.25s ease;
+}
+
+.ft-block-event-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  background: rgba(239, 68, 68, 0.13);
+  border-bottom: 1px solid rgba(239, 68, 68, 0.25);
+}
+
+.ft-block-event-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.ft-block-event-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.ft-block-event-desc {
+  margin: 0;
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  color: var(--text);
 }
 
 .ft-scenario-tool-head {

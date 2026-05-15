@@ -1327,7 +1327,11 @@ export function sentinelControlPlugin(): Plugin {
 
         if (url === "/api/sentinel/tools-diff" && req.method === "GET") {
           const baselinePath = defaultBaselinePath();
-          const tracePath = defaultTracePath();
+          const parsedUrl = new URL(req.url ?? "", "http://localhost");
+          const wsUrl = String(parsedUrl.searchParams.get("wsUrl") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_WS_URL ?? "").trim();
+          const token = String(parsedUrl.searchParams.get("token") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_TOKEN ?? "").trim();
 
           let baselineNames: string[] = [];
           try {
@@ -1340,35 +1344,42 @@ export function sentinelControlPlugin(): Plugin {
             /* baseline not found — empty */
           }
 
-          // tools.effective is preferred; fall back to tools.catalog if effective is empty
-          let currentNamesEffective: string[] = [];
-          let currentNamesCatalog: string[] = [];
-          try {
-            const lines = fs.readFileSync(tracePath, "utf8").split("\n").filter(Boolean);
-            for (const line of lines) {
+          let currentNames: string[] = [];
+          if (wsUrl && token) {
+            const queryPy = path.join(REPO_ROOT, "scripts", "runner", "policy_query.py");
+            if (fs.existsSync(queryPy)) {
               try {
-                const rec = JSON.parse(line) as {
-                  entry_type?: string;
-                  rpc_method?: string;
-                  payload_summary?: { tool_names?: unknown };
-                };
-                if (rec.entry_type !== "tools_snapshot") continue;
-                const names = rec.payload_summary?.tool_names;
-                if (!Array.isArray(names) || names.length === 0) continue;
-                const filtered = names.filter((x): x is string => typeof x === "string");
-                if (rec.rpc_method === "tools.effective") {
-                  currentNamesEffective = filtered;
-                } else if (rec.rpc_method === "tools.catalog") {
-                  currentNamesCatalog = filtered;
+                const { stdout } = await runPythonInWsl(queryPy, [], {
+                  env: {
+                    ...process.env,
+                    PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+                    PYTHONUTF8: "1",
+                    OPENCLAW_GATEWAY_WS_URL: wsUrl,
+                    OPENCLAW_GATEWAY_TOKEN: token,
+                    POLICY_METHOD: "tools.catalog",
+                  },
+                  maxBuffer: 4 * 1024 * 1024,
+                  timeout: 20_000,
+                });
+                const text = String(stdout ?? "").trim();
+                const parsed = text ? (JSON.parse(text) as { ok?: boolean; payload?: unknown }) : null;
+                if (parsed?.ok && parsed.payload) {
+                  const payload = parsed.payload as { groups?: { tools?: { id?: string }[] }[] };
+                  if (Array.isArray(payload.groups)) {
+                    for (const g of payload.groups) {
+                      if (Array.isArray(g.tools)) {
+                        for (const t of g.tools) {
+                          if (typeof t.id === "string" && t.id) currentNames.push(t.id);
+                        }
+                      }
+                    }
+                  }
                 }
               } catch {
-                /* skip malformed line */
+                /* gateway unreachable */
               }
             }
-          } catch {
-            /* trace not found */
           }
-          const currentNames = currentNamesEffective.length > 0 ? currentNamesEffective : currentNamesCatalog;
 
           const baselineSet = new Set(baselineNames);
           const currentSet = new Set(currentNames);
@@ -1378,7 +1389,6 @@ export function sentinelControlPlugin(): Plugin {
           sendJson(res, 200, {
             ok: true,
             baselinePath,
-            tracePath,
             baseline: baselineNames,
             current: currentNames,
             added,
