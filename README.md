@@ -154,7 +154,7 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 |----------|------|
 | `scripts/openclaw_ws.py` | 게이트웨이 WebSocket 클라이언트 (`connect`, RPC, 이벤트) |
 | `scripts/sentinel/ingest.py` | 구독·정규화·append-only `data/trace.jsonl`, `tools.effective` / `tools.catalog` 스냅샷 |
-| `scripts/sentinel/detect.py` | `rules/*.yaml`, trace, 베이스라인 diff → findings JSON |
+| `scripts/sentinel/detect.py` | `rules/*.yaml`, trace, 베이스라인 diff → findings JSON. S2 룰 일부는 오픈소스 [vigil-llm](https://github.com/deadbits/vigil-llm)(Apache-2.0)에서 포팅 |
 | `scripts/sentinel/respond.py` | 알림·`findings-latest.json`, 조건부 `sessions.abort` |
 | `scripts/runner/send_scenario.py` | `OPENCLAW_GATEWAY_*` 로 접속해 `chat.send` 등 시나리오 주입 |
 | `scripts/runner/toggle_guardrail.py`, `check_plugin.py` | 러너 보조 스크립트 ([runner/README.md](scripts/runner/README.md)) |

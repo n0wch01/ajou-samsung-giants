@@ -84,3 +84,70 @@ rules:
     match:
       type: trace_line_regex
       pattern: '(?i)(env-snapshot|\.env.*읽|읽.*\.env|env.*파일.*읽|단계별.*지시)'
+
+  # ── Vigil 룰 포팅 (source: deadbits/vigil-llm@main/data/yara) ─────────────
+  # https://github.com/deadbits/vigil-llm
+  # 라이선스: Apache-2.0. 룰만 발췌하여 우리 YAML 매처에 맞게 정규식 변환.
+
+  # InstructionBypass.yar — "Ignore previous instructions" 류 우회 지시 감지
+  - id: s2-vigil-instruction-bypass
+    severity: high
+    title: S2 지시 무력화 시도 감지 (Vigil InstructionBypass)
+    message: >-
+      외부 문서나 사용자 입력에서 이전 지시를 무시·우회하라는 표현이
+      감지됐습니다. 대표적인 프롬프트 인젝션 우회 패턴입니다.
+    recommendedAction: >-
+      해당 입력의 출처를 확인하고 에이전트에 전달되지 않도록 차단하세요.
+      가능하다면 신뢰 경계에서 입력 검증·필터를 적용하세요.
+    match:
+      type: trace_line_regex
+      # Vigil 원본 + 사이에 형용사가 끼는 변형 허용 (예: "ignore all previous instructions")
+      pattern: '(?i)(ignore|disregard|skip|forget|neglect|overlook|omit|bypass|pay no attention to|do not follow|do not obey)(?:\s+\w+){0,3}\s+(content|text|instructions?|directives?|commands?|context|conversation|inputs?|data|messages?|communication|responses?|requests?)'
+
+  # SystemInstructions.yar — 다양한 모델의 시스템 토큰/마커 감지
+  - id: s2-vigil-system-instruction-markers
+    severity: high
+    title: S2 시스템 인스트럭션 마커 감지 (Vigil SystemInstructions)
+    message: >-
+      LLM 시스템 프롬프트로 사용되는 마커(<|im_start|>system, <s>[INST], <<SYS>>,
+      [system](#assistant) 등)가 입력에서 감지됐습니다. 시스템 권한을 위장한
+      프롬프트 인젝션 가능성이 있습니다.
+    recommendedAction: >-
+      외부 입력에서 LLM 제어 토큰을 발견했다면 즉시 격리하고 입력 sanitization을
+      적용하세요. 신뢰할 수 없는 텍스트는 model-control 토큰을 이스케이프하여
+      전달하세요.
+    match:
+      type: trace_line_regex
+      pattern: '(System Instruction:\s|\[system\]\(#(assistant|context)\)|<s>\[INST\]\s*<<SYS>>|<</SYS>>|<\|im_start\|>(assistant|system)|\{\{#system~\}\}|\{\{/system~\}\})'
+
+  # MarkdownExfiltration.yar — Markdown 이미지 쿼리 파라미터로 데이터 유출
+  - id: s2-vigil-markdown-exfiltration
+    severity: critical
+    title: S2 Markdown 이미지로 데이터 유출 시도 감지 (Vigil MarkdownExfiltration)
+    message: >-
+      Markdown 이미지 문법(![alt](https://attacker/x?q=...))을 통해 외부
+      엔드포인트로 데이터를 유출하는 패턴이 감지됐습니다. Bing Chat 등에서
+      알려진 데이터 유출 기법입니다.
+    recommendedAction: >-
+      에이전트 응답에서 외부 URL 이미지를 렌더링하지 마세요. 응답에 외부
+      도메인이 포함된 이미지가 있으면 즉시 차단·로그하고, 자격증명 노출 여부를
+      검토하세요.
+    match:
+      type: trace_line_regex
+      pattern: '!\[[^\]]+\]\(https?://[^\s)]+\?q=[^)]*\)'
+
+  # Guidance.yar — Guidance 프레임워크 템플릿 토큰 감지
+  - id: s2-vigil-guidance-template-markers
+    severity: medium
+    title: S2 Guidance 프레임워크 템플릿 토큰 감지 (Vigil ContainsGuidance)
+    message: >-
+      입력에서 Guidance 프레임워크의 역할 템플릿 토큰
+      ({{#system~}}, {{#user~}}, {{#assistant~}} 등)이 감지됐습니다.
+      LLM 역할을 위장하려는 프롬프트 인젝션 시도일 수 있습니다.
+    recommendedAction: >-
+      외부 입력에서 발견된 템플릿 토큰을 이스케이프하거나 제거하고,
+      Guidance 등 템플릿 엔진을 사용한다면 신뢰할 수 없는 입력은
+      raw text로만 처리되도록 하세요.
+    match:
+      type: trace_line_regex
+      pattern: '\{\{#(system|user|assistant)~\}\}|\{\{/(system|user|assistant)~\}\}'
