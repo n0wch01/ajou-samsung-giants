@@ -90,9 +90,9 @@ sequenceDiagram
 |------|------|
 | **사전 준비** | `bash scripts/setup-workspace.sh` 실행으로 workspace에 mock 파일 배치 |
 | **bridge 시작** | `python bridge.py` → `http://localhost:8000` 확인 |
-| **대시보드** | `npm run dev` (security-viz/) 실행 후 시나리오 탭 접근 |
-| **S2 실행** | 시나리오 탭 하단 S2 채팅 패널에서 프리셋 메시지 전송 |
-| **탐지 확인** | Sentinel 탐지 탭에서 `s2-env-file-read`, `s2-credentials-leaked-in-trace` finding 확인 |
+| **대시보드** | `npm run dev` (security-viz/) 실행 후 Test Scenario 탭 접근 |
+| **S2 실행** | Test Scenario 탭 하단 S2 채팅 패널에서 프리셋 메시지 전송 |
+| **탐지 확인** | Monitoring 탭에서 `s2-env-file-read`, `s2-credentials-leaked-in-trace` finding 확인 |
 
 ## Sentinel 탐지 규칙 (SSOT: `scripts/sentinel/rules/s2_data_leakage.yaml`)
 

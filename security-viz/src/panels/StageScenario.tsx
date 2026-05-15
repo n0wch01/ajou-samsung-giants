@@ -338,7 +338,7 @@ export function StageScenario(props: StageScenarioProps) {
       {/* ── 페이지 헤더 ── */}
       <div className="sc-page-header">
         <div className="sc-page-title-wrap">
-          <h2 className="sc-page-title">시나리오 실행</h2>
+          <h2 className="sc-page-title">Test Scenario</h2>
           <p className="sc-page-desc">AI Agent 보안 시나리오를 선택하고 실행하여 탐지 및 대응 결과를 확인하세요.</p>
         </div>
         <div className="sc-status-bar">
