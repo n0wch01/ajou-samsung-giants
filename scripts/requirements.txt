@@ -1,0 +1,6 @@
+# SG Sentinel & runner — 버전은 팀 표준에 맞출 것
+websockets>=12.0
+PyYAML>=6.0
+httpx>=0.27.0
+cryptography>=42.0.0
+pytest>=8.0

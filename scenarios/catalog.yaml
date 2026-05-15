@@ -1,0 +1,23 @@
+# 시나리오 인덱스
+version: 1
+scenarios:
+  - id: S1
+    title: 악성 플러그인 공급망 공격
+    path: s1-plugin-supply-chain.md
+    inference: dgx_spark
+    status: active
+    notes: "SSOT 단일 파일: scenarios/s1-plugin-supply-chain.md"
+
+  - id: S2
+    title: Data Leakage — README Prompt Injection
+    path: s2-data-leakage.md
+    inference: dgx_spark
+    status: active
+    notes: "SSOT 단일 파일: scenarios/s2-data-leakage.md"
+
+  - id: S3
+    title: API Abuse / Denial of Wallet
+    path: s3-api-abuse.md
+    inference: dgx_spark
+    status: active
+    notes: "SSOT 단일 파일: scenarios/s3-api-abuse.md"

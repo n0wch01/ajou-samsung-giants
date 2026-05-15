@@ -1,0 +1,82 @@
+# --- OS · 에디터 ---
+.DS_Store
+**/.DS_Store
+Thumbs.db
+.idea/
+*.swp
+*.swo
+*~
+
+# --- Node (security-viz, mock-malicious-plugin 등) ---
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+coverage/
+*.tsbuildinfo
+.npm/
+.pnpm-store/
+pnpm-lock.yaml
+bun.lock
+bun.lockb
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+.venv*/
+venv/
+ENV/
+env.bak/
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.coverage
+.coverage.*
+htmlcov/
+pip-wheel-metadata/
+
+# --- 환경 변수 (커밋 금지) ---
+.env
+.env.local
+.env.*.local
+security-viz/.env
+security-viz/.env.*
+!security-viz/.env.example
+docker-compose.override.yml
+docker-compose.extra.yml
+
+# --- SG: Sentinel 런타임 산출물 ---
+# 세부 무시: scripts/sentinel/data/.gitignore (trace, findings 등)
+scripts/sentinel/data/*
+!scripts/sentinel/data/.gitignore
+!scripts/sentinel/data/baseline-tools-effective.example.json
+
+# --- 로컬 스크래치 · 로그 ---
+tmp/
+.tmp/
+*.log
+.local/
+docs/.local/
+docs/internal/
+
+# --- 에이전트 · 자격 증명 (로컬만) ---
+/memory/
+.agent/*
+!.agent/workflows/
+.claude/
+skills-lock.json
+IDENTITY.md
+USER.md
+.serena/
+
+# --- 기타 ---
+.worktrees/
+*.tgz
