@@ -702,18 +702,25 @@ function ScenarioToolBodyToggle({
   );
 }
 
-function ToolBlock({ tool }: { tool: ParsedTool }) {
+function ToolBlock({ tool, aborted = false }: { tool: ParsedTool; aborted?: boolean }) {
   const showOut = tool.displayOutput.trim() || tool.output.trim();
   const hasArgs = Boolean(tool.args.trim());
   const [argsOpen, setArgsOpen] = useState(false);
+  const isAbortedTool = aborted && !showOut;
 
   return (
-    <div className={`ft-scenario-tool-card${tool.isMalicious ? " ft-scenario-tool-card-danger" : ""}`}>
+    <div
+      className={`ft-scenario-tool-card${tool.isMalicious ? " ft-scenario-tool-card-danger" : ""}${isAbortedTool ? " ft-scenario-tool-card-aborted" : ""}`}
+    >
       <div className="ft-scenario-tool-head">
-        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : "🔧"}</span>
+        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : isAbortedTool ? "🛑" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{tool.name}</code>
         {tool.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
-        {!showOut && <span className="ft-badge-running">실행 중…</span>}
+        {isAbortedTool ? (
+          <span className="ft-badge-fail">차단됨</span>
+        ) : (
+          !showOut && <span className="ft-badge-running">실행 중…</span>
+        )}
       </div>
       {hasArgs ? (
         <ScenarioToolBodyToggle
@@ -903,6 +910,78 @@ function RealtimeInterceptBanner({
                   <span className="ft-intercept-label">{f.title}</span>
                 </li>
               ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── S3 인터셉트 배너 (auto-abort + s3-* findings) ────────────
+
+function S3InterceptBanner({ s3, toolStatus }: { s3: S3Verdict | null; toolStatus: StepStatus }) {
+  if (!s3) return null;
+  if (toolStatus === "pending") return null;
+  if (s3.s3HighFindings.length === 0 && !s3.autoAbort.phase) return null;
+
+  const abortPhase = s3.autoAbort.phase;
+  const abortOk = s3.autoAbort.ok;
+  const isBlocked = abortPhase === "result" && abortOk === true;
+  const isSkipped = abortPhase === "skipped";
+  const isFailed = abortPhase === "result" && abortOk === false;
+
+  let abortLabel = "";
+  let abortIcon = "🛡";
+  if (isBlocked) {
+    abortLabel = "auto-abort 발사 → 세션 강제 종료 성공";
+    abortIcon = "🛡";
+  } else if (isSkipped) {
+    abortLabel = "auto-abort 스킵 (Direct/Guardrail OFF 모드) — 차단 미실행";
+    abortIcon = "⚠";
+  } else if (isFailed) {
+    abortLabel = "auto-abort RPC 실패";
+    abortIcon = "❌";
+  } else if (abortPhase === "trigger") {
+    abortLabel = "auto-abort 트리거 — RPC 응답 대기";
+    abortIcon = "⏳";
+  } else if (abortPhase === "exception") {
+    abortLabel = "auto-abort 예외 발생";
+    abortIcon = "❌";
+  }
+
+  return (
+    <div className="ft-intercept-row">
+      <div className="ft-intercept-banner">
+        <div className="ft-intercept-header">
+          <span className="ft-intercept-icon">{abortIcon}</span>
+          <span className="ft-intercept-title">Sentinel 실시간 인터셉트 (S3 — API Abuse)</span>
+        </div>
+
+        {s3.s3HighFindings.length > 0 && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">서버 실시간 탐지 (Rate Limit · Loop · Keyword)</div>
+            <ul className="ft-intercept-list">
+              {s3.s3HighFindings.map((f) => (
+                <li key={f.ruleId} className="ft-intercept-item">
+                  <span className="ft-intercept-cat-icon">⚡</span>
+                  <span className="ft-intercept-cat">[{f.severity.toUpperCase()}]</span>
+                  <span className="ft-intercept-label">{f.title ?? f.ruleId}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {abortLabel && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">대응 조치 (sessions.abort)</div>
+            <ul className="ft-intercept-list">
+              <li className="ft-intercept-item">
+                <span className="ft-intercept-cat-icon">{abortIcon}</span>
+                <span className="ft-intercept-cat">[{abortPhase ?? "?"}]</span>
+                <span className="ft-intercept-label">{abortLabel}</span>
+              </li>
             </ul>
           </div>
         )}
@@ -1277,9 +1356,15 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
                         호출: {turn.toolNames.join(", ")}
                       </div>
                     )}
-                    {turn.tools.map((t) => (
-                      <ToolBlock key={t.id} tool={t} />
-                    ))}
+                    {turn.tools.map((t) => {
+                      // S3 auto-abort 결과 ok=true 인 경우, 결과 못 받은 도구를 "차단됨"으로 표시
+                      const s3AbortedTool =
+                        s3 !== null &&
+                        s3.autoAbort.phase === "result" &&
+                        s3.autoAbort.ok === true &&
+                        scenarioId === "S3";
+                      return <ToolBlock key={t.id} tool={t} aborted={s3AbortedTool} />;
+                    })}
                   </Step>
                 </>
               )}
@@ -1291,6 +1376,11 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
               rtFindings={rtFindings}
               toolStatus={turn.toolStatus}
             />
+
+            {/* ── S3 인터셉트 배너: scenarioId === S3 일 때만 ── */}
+            {scenarioId === "S3" && (
+              <S3InterceptBanner s3={s3} toolStatus={turn.toolStatus} />
+            )}
 
             {/* ── 외부 전송 승인 게이트 ── */}
             <FetchGatePanel
