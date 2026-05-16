@@ -57,16 +57,17 @@ function ToolsCatalogView({
   highlightToolId,
   wsUrl,
   token,
+  onRefreshCatalog,
 }: {
   data: unknown;
   highlightToolId?: string | null;
   wsUrl?: string;
   token?: string;
+  onRefreshCatalog?: () => void;
 }) {
   const [search, setSearch] = useState("");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [deleteMsg, setDeleteMsg] = useState<{ id: string; ok: boolean; text: string } | null>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
   const groups = extractGroups(data);
   const q = search.toLowerCase();
@@ -101,20 +102,19 @@ function ToolsCatalogView({
   const handleDelete = useCallback(async (group: CatalogGroup) => {
     const pluginId = group.pluginId ?? group.id;
     setDeletingId(group.id);
-    setDeleteMsg(null);
     try {
       const ws = (wsUrl ?? "").trim();
       const tok = (token ?? "").trim();
       const url = apiPath(`/api/policy/plugin-delete?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}&pluginId=${encodeURIComponent(pluginId)}`);
       const res = await fetch(url, { method: "POST" });
       const j = (await res.json()) as { ok?: boolean; message?: string };
-      setDeleteMsg({ id: group.id, ok: !!j.ok, text: j.message ?? (j.ok ? "삭제 완료" : "삭제 실패") });
-    } catch (e) {
-      setDeleteMsg({ id: group.id, ok: false, text: e instanceof Error ? e.message : "삭제 중 오류" });
+      if (j.ok) onRefreshCatalog?.();
+    } catch {
+      // silent
     } finally {
       setDeletingId(null);
     }
-  }, [wsUrl, token]);
+  }, [wsUrl, token, onRefreshCatalog]);
 
   if (groups.length === 0) {
     return <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>도구 그룹을 찾을 수 없습니다.</p>;
@@ -144,7 +144,6 @@ function ToolsCatalogView({
             (g.id === highlightToolId || g.pluginId === highlightToolId ||
               g.tools.some((t) => t.id === highlightToolId));
           const isDeleting = deletingId === g.id;
-          const msg = deleteMsg?.id === g.id ? deleteMsg : null;
 
           return (
             <div
@@ -178,11 +177,7 @@ function ToolsCatalogView({
                   </button>
                 )}
               </div>
-              {msg && (
-                <p className={`policy-plugin-msg${msg.ok ? " policy-plugin-msg-ok" : " policy-plugin-msg-err"}`}>
-                  {msg.text}
-                </p>
-              )}
+
               {isOpen && (
                 <div className="policy-group-tools">
                   {g.tools.map((t) => (
@@ -573,6 +568,7 @@ export function StagePolicy(props: StagePolicyProps) {
                   highlightToolId={props.highlightToolId}
                   wsUrl={props.wsUrl}
                   token={props.token}
+                  onRefreshCatalog={props.onRefreshCatalog}
                 />
               )}
             </div>
