@@ -17,6 +17,8 @@ export type UseGatewayReadonly = {
   timeline: TimelineEntry[];
   rawFrames: GwFrame[];
   jsonlLines: string[];
+  /** connect()가 호출된 시각(ms). 이 시점 이전 이벤트는 세션 히스토리 재전송분. */
+  connectedAt: number | null;
   connect: (wsUrl: string, token: string, sessionKey: string) => void;
   disconnect: () => void;
   /** Read-only RPC after hello. */
@@ -43,6 +45,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
   const [lastHello, setLastHello] = useState<unknown>(null);
   const [rawFrames, setRawFrames] = useState<GwFrame[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
 
   const appendFrame = useCallback((frame: GwFrame) => {
     setRawFrames((prev) => {
@@ -160,6 +163,9 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     pendingRef.current.clear();
     connectReqIdRef.current = null;
     setConnState("idle");
+    setTimeline([]);
+    setRawFrames([]);
+    setConnectedAt(null);
   }, []);
 
   const connect = useCallback(
@@ -172,6 +178,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
       setLastHello(null);
       setRawFrames([]);
       setTimeline([]);
+      setConnectedAt(Date.now());
 
       let socket: WebSocket;
       try {
@@ -315,6 +322,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     timeline,
     rawFrames,
     jsonlLines,
+    connectedAt,
     connect,
     disconnect,
     sendReadonly,

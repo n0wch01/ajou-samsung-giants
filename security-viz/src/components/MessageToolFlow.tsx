@@ -8,7 +8,6 @@ import { type GwFrame } from "../gateway/protocol";
 import { apiPath } from "../lib/publicAsset";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
-import { useFindings } from "../sentinel/useFindings";
 import type { NavAction } from "../App";
 
 type MessageToolFlowProps = {
@@ -23,6 +22,8 @@ type MessageToolFlowProps = {
   onChatSent?: () => void;
   /** 탭/모니터링 네비게이션 콜백 */
   onNavigate?: (action: NavAction) => void;
+  /** connect()가 호출된 시각(ms). 이 시점 이전 이벤트는 히스토리 재전송분으로 숨긴다. */
+  connectedAt?: number | null;
 };
 
 export type ToolLine = {
@@ -838,47 +839,23 @@ function buildChatTurns(entries: TimelineEntry[]): {
   };
 }
 
-function detectCategoryLabel(ruleId: string): string {
-  const id = ruleId.toLowerCase();
-  if (id.includes("s1") || id.includes("plugin") || id.includes("supply")) return "악성 플러그인";
-  if (id.includes("s2") || id.includes("injection") || id.includes("readme") || id.includes("md") || id.includes("prompt")) return "악성 MD";
-  if (id.includes("s3") || id.includes("rate") || id.includes("abuse") || id.includes("loop") || id.includes("exhaustion")) return "API Abuse";
-  return "보안 위협";
-}
 
 export function MessageToolFlow(props: MessageToolFlowProps) {
   const [openToolId, setOpenToolId] = useState<string | null>(null);
+  const liveEntries = useMemo(() => {
+    const threshold = props.connectedAt != null ? props.connectedAt - 10_000 : null;
+    if (threshold == null) return props.entries;
+    return props.entries.filter((e) => e.at >= threshold);
+  }, [props.entries, props.connectedAt]);
+
   const { turns, orphanTools, orphanAssistantChunks } = useMemo(
-    () => buildChatTurns(props.entries),
-    [props.entries],
+    () => buildChatTurns(liveEntries),
+    [liveEntries],
   );
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
-
-  // 탐지 알림 배너
-  const { findings } = useFindings({ pollMs: 1000, useSse: false });
-  const prevFindingIds = useRef<Set<string>>(new Set());
-  const [newAlerts, setNewAlerts] = useState<Array<{ id: string; label: string; findingId: string; message: string; severity: string }>>([]);
-
-  useEffect(() => {
-    const currentIds = new Set(findings.map((f) => f.id));
-    const fresh = findings.filter((f) => !prevFindingIds.current.has(f.id));
-    if (fresh.length > 0) {
-      setNewAlerts((prev) => [
-        ...prev,
-        ...fresh.map((f) => ({
-          id: f.id,
-          label: detectCategoryLabel(f.ruleId),
-          findingId: f.id,
-          message: f.message,
-          severity: f.severity,
-        })),
-      ]);
-    }
-    prevFindingIds.current = currentIds;
-  }, [findings]);
 
   // 사용자가 위로 스크롤하면 자동 스크롤 잠시 중단
   useEffect(() => {
@@ -1012,40 +989,6 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         ))}
         <div ref={bottomRef} />
       </div>
-
-      {/* 탐지 알림 배너 */}
-      {newAlerts.length > 0 && (
-        <div className="chat-detect-banners">
-          {newAlerts.map((alert) => (
-            <div key={alert.id} className={`chat-detect-banner${alert.severity === "critical" || alert.severity === "high" ? " chat-detect-banner-critical" : ""}`}>
-              <span className="chat-detect-banner-icon">⚠</span>
-              <span className="chat-detect-banner-text">
-                <strong>{alert.label}</strong> 탐지 — 세션이 차단되었습니다
-                {alert.message ? <span className="chat-detect-banner-summary">{alert.message}</span> : null}
-              </span>
-              {props.onNavigate && (
-                <button
-                  type="button"
-                  className="chat-detect-banner-link"
-                  onClick={() => {
-                    props.onNavigate?.({ tab: "monitoring", highlightFindingId: alert.findingId });
-                    setNewAlerts((prev) => prev.filter((a) => a.id !== alert.id));
-                  }}
-                >
-                  자세히 보기 →
-                </button>
-              )}
-              <button
-                type="button"
-                className="chat-detect-banner-close"
-                onClick={() => setNewAlerts((prev) => prev.filter((a) => a.id !== alert.id))}
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
 
       <ChatInput
         wsUrl={props.wsUrl}

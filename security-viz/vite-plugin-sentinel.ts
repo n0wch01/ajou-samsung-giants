@@ -433,9 +433,8 @@ export function sentinelControlPlugin(): Plugin {
     configureServer(server) {
       server.httpServer?.once("close", () => killChild());
 
-      // trace.jsonl 감시 시작 + 기존 파일 있으면 즉시 1회 실행
+      // trace.jsonl 감시 시작 (서버 시작 시에는 detect 자동 실행 안 함 — 오래된 데이터로 인한 허위 경고 방지)
       setupTraceWatcher();
-      void runAutoDetect();
 
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
@@ -730,6 +729,17 @@ export function sentinelControlPlugin(): Plugin {
             await ensureS2WorkspaceFixtures();
           }
 
+          // ingest.py 자동 시작 — 시나리오 실행 시 미실행 상태이면 자동으로 켬
+          // trace 파일 초기화 — 이전 실행 데이터로 인한 허위 경고 방지
+          try {
+            const tp = defaultTracePath();
+            const rtPath = path.join(path.dirname(tp), "findings-realtime.jsonl");
+            if (fs.existsSync(tp)) fs.writeFileSync(tp, "", "utf-8");
+            if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
+            cachedReport = null;
+            cachedReportAt = null;
+          } catch { /* 무시 */ }
+
           const sendPy = sendScenarioScript();
           if (!fs.existsSync(sendPy)) {
             sendJson(res, 500, { ok: false, message: `send_scenario.py not found: ${sendPy}` });
@@ -912,12 +922,35 @@ export function sentinelControlPlugin(): Plugin {
         }
 
         if (url === "/api/sentinel/findings" && req.method === "GET") {
-          // trace 있는데 캐시가 없으면 즉시 1회 실행 후 응답
-          if (cachedReport === null && fs.existsSync(defaultTracePath())) {
-            await runAutoDetect();
+
+          // findings-realtime.jsonl (ingest.py 실시간 탐지) 읽기
+          const rtPath = path.join(path.dirname(defaultTracePath()), "findings-realtime.jsonl");
+          const rtFindings: unknown[] = [];
+          if (fs.existsSync(rtPath)) {
+            for (const line of fs.readFileSync(rtPath, "utf-8").split("\n")) {
+              const t = line.trim();
+              if (!t) continue;
+              try { rtFindings.push(JSON.parse(t)); } catch { /* skip */ }
+            }
           }
+
+          // cachedReport.findings + rtFindings 병합 (id 기준 중복 제거, rt 우선)
+          const reportFindings: unknown[] = Array.isArray(
+            (cachedReport as Record<string, unknown> | null)?.["findings"]
+          ) ? ((cachedReport as Record<string, unknown>)["findings"] as unknown[]) : [];
+          const merged = new Map<string, unknown>();
+          for (const f of reportFindings) {
+            const id = (f as Record<string, unknown>)?.["id"];
+            if (typeof id === "string") merged.set(id, f);
+          }
+          for (const f of rtFindings) {
+            const id = (f as Record<string, unknown>)?.["id"];
+            if (typeof id === "string") merged.set(id, f);
+          }
+
           sendJson(res, 200, {
             ok: true,
+            findings: [...merged.values()],
             report: cachedReport ?? { findings: [] },
             checkedAt: cachedReportAt,
             busy: autoDetectBusy,
@@ -1121,6 +1154,23 @@ export function sentinelControlPlugin(): Plugin {
         if (url === "/api/sentinel/stop" && req.method === "POST") {
           spawnError = null;
           killChild();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/reset-findings" && req.method === "POST") {
+          // ingest.py 종료 — 이후 trace.jsonl에 새 이벤트가 쓰이지 않도록
+          killChild();
+          cachedReport = null;
+          cachedReportAt = null;
+          const dataDir = path.dirname(defaultTracePath());
+          const rtPath = path.join(dataDir, "findings-realtime.jsonl");
+          const tracePath = defaultTracePath();
+          try {
+            if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
+            // trace.jsonl 초기화 — 파일 워처가 detect.py를 재실행해도 결과가 비어있도록
+            if (fs.existsSync(tracePath)) fs.writeFileSync(tracePath, "", "utf-8");
+          } catch { /* 무시 */ }
           sendJson(res, 200, { ok: true });
           return;
         }

@@ -148,26 +148,25 @@ export function StageScenario(props: StageScenarioProps) {
       return;
     }
 
-    if (entry.id === "S3") {
-      showHint(`${entry.id}: Sentinel 재시작 중 (trace 초기화 + auto-abort 활성화)…`, "info");
-      try {
-        await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
-        await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
-        const startRes = await fetch(apiPath("/api/sentinel/start"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ wsUrl: ws, token: tok, sessionKey: key }),
-        });
-        const startJ = (await startRes.json()) as { ok?: boolean; message?: string };
-        if (!startJ.ok) {
-          showHint(`Sentinel 재시작 실패: ${startJ.message ?? "unknown"} — 수동으로 시작 후 재실행하세요.`, "err");
-          return;
-        }
-        await new Promise<void>((r) => window.setTimeout(r, 2000));
-      } catch (e) {
-        showHint(`Sentinel 재시작 오류: ${e instanceof Error ? e.message : String(e)}`, "err");
+    // 모든 시나리오: Sentinel 시작 (미실행 상태이면 자동으로 켬)
+    showHint(`${entry.id}: Sentinel 시작 중…`, "info");
+    try {
+      await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
+      const startRes = await fetch(apiPath("/api/sentinel/start"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ wsUrl: ws, token: tok, sessionKey: key }),
+      });
+      const startJ = (await startRes.json()) as { ok?: boolean; message?: string };
+      if (!startJ.ok) {
+        showHint(`Sentinel 시작 실패: ${startJ.message ?? "unknown"} — 수동으로 시작 후 재실행하세요.`, "err");
         return;
       }
+      await new Promise<void>((r) => window.setTimeout(r, 1500));
+    } catch (e) {
+      showHint(`Sentinel 시작 오류: ${e instanceof Error ? e.message : String(e)}`, "err");
+      return;
     }
 
     let ps: PluginStatus | undefined = pluginStatuses[entry.id];

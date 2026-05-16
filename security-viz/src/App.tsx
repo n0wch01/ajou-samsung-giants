@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { publicAsset, apiPath } from "./lib/publicAsset";
 import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
@@ -19,6 +19,18 @@ export type NavAction = {
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
+  const [alertResetKey, setAlertResetKey] = useState(0);
+
+  // 페이지 로드 시 이전 세션 데이터 전체 초기화
+  useEffect(() => {
+    void (async () => {
+      // ingest.py 종료 → trace 삭제 → findings 초기화 순으로 처리
+      await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/reset-findings"), { method: "POST" }).catch(() => {});
+      setAlertResetKey((k) => k + 1);
+    })();
+  }, []);
   const [highlightFindingId, setHighlightFindingId] = useState<string | null>(null);
   const [highlightToolId, setHighlightToolId] = useState<string | null>(null);
   const [highlightSection, setHighlightSection] = useState<string | null>(null);
@@ -172,6 +184,7 @@ export function App() {
               sessionKey={sessionKey}
               injectFrame={gw.injectFrame}
               onNavigate={navigate}
+              connectedAt={gw.connectedAt}
             />
           </section>
 
@@ -180,6 +193,7 @@ export function App() {
               timeline={gw.timeline}
               highlightFindingId={highlightFindingId}
               onNavigate={navigate}
+              alertResetKey={alertResetKey}
             />
           </section>
 

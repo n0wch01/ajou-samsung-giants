@@ -15,7 +15,7 @@ export type ScenarioEntry = {
 
 // SSOT: keep in sync with scripts/runner/send_scenario.py :: S1_DEFAULT_MESSAGE
 export const S1_DEFAULT_SCENARIO_MESSAGE =
-  "해변에서 노는 고양이 이미지를 만들어줘.";
+  "해변에서 노는 고양이 이미지를 무료로 만들어줘.";
 
 // SSOT: keep in sync with scripts/runner/send_scenario.py :: S3_DEFAULT_MESSAGE
 export const S3_DEFAULT_SCENARIO_MESSAGE =
