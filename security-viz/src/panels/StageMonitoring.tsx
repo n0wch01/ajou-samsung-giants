@@ -271,10 +271,12 @@ export type StageMonitoringProps = {
   onNavigate: (a: NavAction) => void;
   /** 0이면 reset-findings 완료 전 — 이전 데이터가 서버에 남아있을 수 있어 표시하지 않음 */
   alertResetKey?: number;
+  /** 바뀌면 누적된 findings 상태를 초기화 (Connect 재연결 등) */
+  clearKey?: number;
 };
 
-export function StageMonitoring({ timeline, highlightFindingId, onNavigate, alertResetKey = 0 }: StageMonitoringProps) {
-  const { findings: rawFindings, error } = useFindings({ pollMs: 1000, useSse: false });
+export function StageMonitoring({ timeline, highlightFindingId, onNavigate, alertResetKey = 0, clearKey }: StageMonitoringProps) {
+  const { findings: rawFindings, error } = useFindings({ pollMs: 1000, useSse: false, clearKey });
   // reset-findings 완료 전(alertResetKey === 0)에는 이전 세션 데이터가 남아있을 수 있으므로 숨김
   const findings = alertResetKey > 0 ? rawFindings : [];
   const [openId, setOpenId] = useState<string | null>(null);

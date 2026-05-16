@@ -16,7 +16,7 @@ function useRealtimeFindings(active: boolean, clearKey: number | undefined): Rea
   useEffect(() => {
     setFindings([]);
     seenIds.current = new Set();
-    void fetch(apiPath("/api/sentinel/findings-realtime/clear"), { method: "POST" }).catch(() => {});
+    // findings-realtime.jsonl은 서버에서 지우지 않음 — 모니터링 패널 누적 유지
   }, [clearKey]);
 
   useEffect(() => {

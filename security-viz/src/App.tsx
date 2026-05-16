@@ -20,6 +20,7 @@ export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
   const [alertResetKey, setAlertResetKey] = useState(0);
+  const [monitoringClearKey, setMonitoringClearKey] = useState(0);
 
   // 페이지 로드 시 이전 세션 데이터 전체 초기화
   useEffect(() => {
@@ -28,6 +29,8 @@ export function App() {
       await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
       await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
       await fetch(apiPath("/api/sentinel/reset-findings"), { method: "POST" }).catch(() => {});
+      // 서버 초기화 완료 후 프론트엔드 상태도 초기화
+      setMonitoringClearKey((k) => k + 1);
       setAlertResetKey((k) => k + 1);
     })();
   }, []);
@@ -69,6 +72,8 @@ export function App() {
     localStorage.setItem("sg.viz.token", token);
     localStorage.setItem("sg.viz.sessionKey", sessionKey);
     gw.connect(wsUrl.trim(), token.trim(), sessionKey.trim());
+    void fetch(apiPath("/api/sentinel/reset-findings"), { method: "POST" }).catch(() => {});
+    setMonitoringClearKey((k) => k + 1);
   }, [gw, sessionKey, token, wsUrl]);
 
   const onRefreshConfig = useCallback(async () => {
@@ -194,6 +199,7 @@ export function App() {
               highlightFindingId={highlightFindingId}
               onNavigate={navigate}
               alertResetKey={alertResetKey}
+              clearKey={monitoringClearKey}
             />
           </section>
 

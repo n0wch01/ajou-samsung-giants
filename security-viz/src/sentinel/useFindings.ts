@@ -38,13 +38,21 @@ function sseUrl(): string {
   return apiPath("/findings/stream");
 }
 
-export function useFindings(opts: { pollMs: number; useSse: boolean }) {
+export function useFindings(opts: { pollMs: number; useSse: boolean; clearKey?: number }) {
   const [findings, setFindings] = useState<SentinelFinding[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+  // clearKey가 바뀌면 진행 중인 fetch 결과를 무시하기 위한 세대 카운터
+  const genRef = useRef(0);
+
+  useEffect(() => {
+    genRef.current += 1;
+    setFindings([]);
+  }, [opts.clearKey]);
 
   const pull = useCallback(async () => {
+    const gen = genRef.current;
     setLoading(true);
     setError(null);
     try {
@@ -53,7 +61,12 @@ export function useFindings(opts: { pollMs: number; useSse: boolean }) {
         throw new Error(`${res.status} ${res.statusText}`);
       }
       const data: unknown = await res.json();
-      setFindings(normalizeFindings(data));
+      const next = normalizeFindings(data);
+      setFindings((prev) => {
+        // clearKey가 바뀐 뒤 완료된 요청이면 버림
+        if (genRef.current !== gen) return prev;
+        return mergeById(prev, next);
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

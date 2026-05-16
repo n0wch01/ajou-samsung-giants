@@ -15,7 +15,6 @@ import json
 import os
 import re
 import sys
-import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,9 +129,10 @@ def _finding(
     title: str,
     message: str,
     recommended_action: str,
+    id_suffix: str = "",
 ) -> dict[str, Any]:
     return {
-        "id": f"{rule_id}-{uuid.uuid4()}",
+        "id": f"{rule_id}{(':' + id_suffix) if id_suffix else ''}",
         "ruleId": rule_id,
         "severity": severity,
         "title": title,
@@ -238,6 +238,7 @@ def _eval_rule(
                         recommended_action=rec_default,
                     )
                 )
+                break  # 룰당 1개만 발화
         return out
 
     if mtype == "event_sequence":
@@ -409,13 +410,13 @@ def _eval_rule(
             return out
         added = [n for n in names if n not in baseline_names]
         matched = [n for n in added if cre.search(n)]
-        for n in matched:
+        if matched:
             out.append(
                 _finding(
                     rule_id=rid,
                     severity=sev,
                     title=title,
-                    message=str(rule.get("message") or f"New tool vs baseline: {n}"),
+                    message=str(rule.get("message") or f"New tools vs baseline: {', '.join(matched)}"),
                     recommended_action=rec_default,
                 )
             )
@@ -492,6 +493,7 @@ class RealTimeRateDetector:
                             or f"{tool} called {len(calls)} times within {window_s:.0f}s window (limit {max_calls})"
                         ),
                         recommended_action=str(rule.get("recommendedAction") or ""),
+                        id_suffix=tool,
                     )
                 )
 
@@ -521,6 +523,7 @@ class RealTimeRateDetector:
                             or f"{tool} called {len(seq)} times consecutively with identical args"
                         ),
                         recommended_action=str(rule.get("recommendedAction") or ""),
+                        id_suffix=tool,
                     )
                 )
 
