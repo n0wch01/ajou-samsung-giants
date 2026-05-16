@@ -470,7 +470,7 @@ export function StagePolicy(props: StagePolicyProps) {
       <div className="sc-page-header">
         <div className="sc-page-title-wrap">
           <h2 className="sc-page-title">Policy</h2>
-          <p className="sc-page-desc">보안 정책 설정과 도구 목록을 검사하고 API Abuse 탐지 기준을 관리합니다.</p>
+          <p className="sc-page-desc">보안 정책 설정</p>
         </div>
         <div className="sc-status-bar">
           <div className="sc-status-item">
