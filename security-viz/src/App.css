@@ -4434,6 +4434,12 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-weight: 600;
 }
 
+.policy-rl-error {
+  font-size: 0.78rem;
+  color: var(--critical);
+  font-weight: 600;
+}
+
 .policy-rl-hint {
   font-size: 0.75rem;
   color: var(--muted);
@@ -4444,4 +4450,70 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   outline: 2px solid var(--warn);
   outline-offset: 2px;
   transition: outline 0.5s ease;
+}
+
+/* ── Blocked notification bubble ─────────────────────────────────────────── */
+.kakao-blocked-notif {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 16px;
+  padding: 12px 14px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-left: 4px solid #ef4444;
+  border-radius: 8px;
+}
+.kakao-blocked-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.kakao-blocked-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+.kakao-blocked-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.kakao-blocked-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #ef4444;
+}
+.kakao-blocked-cat {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(239, 68, 68, 0.15);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.kakao-blocked-msg {
+  font-size: 12px;
+  color: #e8edf5;
+  line-height: 1.4;
+}
+.kakao-blocked-btn {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  border-radius: 6px;
+  color: #fca5a5;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.kakao-blocked-btn:hover {
+  background: rgba(239, 68, 68, 0.28);
 }

@@ -677,6 +677,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
             OPENCLAW_SCENARIO_MESSAGE: message,
+            OPENCLAW_SCENARIO_ID: scenarioId,
           };
           if (resetSession) env.OPENCLAW_RESET_SESSION_FIRST = "1";
           // WSLENV: Windows → WSL 환경 변수 전달 필수
@@ -945,7 +946,7 @@ export function sentinelControlPlugin(): Plugin {
           }
           for (const f of rtFindings) {
             const id = (f as Record<string, unknown>)?.["id"];
-            if (typeof id === "string") merged.set(id, f);
+            if (typeof id === "string") merged.set(id, { ...(f as object), _rt: true });
           }
 
           sendJson(res, 200, {
@@ -1123,6 +1124,57 @@ export function sentinelControlPlugin(): Plugin {
           try {
             if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
             sendJson(res, 200, { ok: true });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: String(e) });
+          }
+          return;
+        }
+
+        // ── S3 Rate Limit Policy: YAML 실시간 읽기/쓰기 ─────────────────────────
+        if (url === "/api/sentinel/rate-limit-policy" && (req.method === "GET" || req.method === "POST")) {
+          const rulesPath = path.join(defaultRulesDir(), "s3_api_abuse.yaml");
+
+          function parseRlPolicy(yaml: string) {
+            const m = yaml.match(/id:\s*s3-rate-limit-tool-calls[\s\S]*?(?=\n  - id:|$)/);
+            const block = m ? m[0] : "";
+            return {
+              maxCalls: parseInt(block.match(/max_calls:\s*(\d+)/)?.[1] ?? "3", 10),
+              windowSec: parseInt(block.match(/window_seconds:\s*(\d+)/)?.[1] ?? "60", 10),
+              warningThreshold: parseInt(block.match(/warning_threshold:\s*(\d+)/)?.[1] ?? "2", 10),
+            };
+          }
+
+          if (req.method === "GET") {
+            try {
+              const yaml = fs.readFileSync(rulesPath, "utf8");
+              sendJson(res, 200, { ok: true, ...parseRlPolicy(yaml) });
+            } catch (e) {
+              sendJson(res, 500, { ok: false, message: String(e) });
+            }
+            return;
+          }
+
+          // POST: update YAML in-place
+          try {
+            const body = await readJsonBody(req);
+            const maxCalls = Math.max(1, Math.min(1000, Number(body.maxCalls ?? 3)));
+            const windowSec = Math.max(1, Math.min(3600, Number(body.windowSec ?? 60)));
+            const warningThreshold = Math.max(1, Math.min(maxCalls - 1, Number(body.warningThreshold ?? maxCalls - 1)));
+
+            let yaml = fs.readFileSync(rulesPath, "utf8");
+            // 해당 rule 블록만 정확히 업데이트
+            const startIdx = yaml.indexOf("  - id: s3-rate-limit-tool-calls");
+            if (startIdx === -1) throw new Error("s3-rate-limit-tool-calls rule not found");
+            const nextRuleIdx = yaml.indexOf("\n  - id:", startIdx + 1);
+            const endIdx = nextRuleIdx === -1 ? yaml.length : nextRuleIdx + 1;
+            let block = yaml.slice(startIdx, endIdx);
+            block = block.replace(/window_seconds:\s*\d+/, `window_seconds: ${windowSec}`);
+            block = block.replace(/max_calls:\s*\d+/, `max_calls: ${maxCalls}`);
+            block = block.replace(/warning_threshold:\s*\d+/, `warning_threshold: ${warningThreshold}`);
+            yaml = yaml.slice(0, startIdx) + block + yaml.slice(endIdx);
+            fs.writeFileSync(rulesPath, yaml, "utf8");
+
+            sendJson(res, 200, { ok: true, maxCalls, windowSec, warningThreshold });
           } catch (e) {
             sendJson(res, 500, { ok: false, message: String(e) });
           }

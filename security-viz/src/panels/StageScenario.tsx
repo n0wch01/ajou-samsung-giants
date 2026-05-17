@@ -153,6 +153,7 @@ export function StageScenario(props: StageScenarioProps) {
     try {
       await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
       await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/findings-realtime/clear"), { method: "POST" }).catch(() => {});
       const startRes = await fetch(apiPath("/api/sentinel/start"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,6 +168,30 @@ export function StageScenario(props: StageScenarioProps) {
     } catch (e) {
       showHint(`Sentinel 시작 오류: ${e instanceof Error ? e.message : String(e)}`, "err");
       return;
+    }
+
+    // S1: 가드레일 활성화 — 메시지 전송 전에 ai_image_gen / ai_model_check를 gateway deny 리스트에 추가
+    if (entry.id === "S1") {
+      showHint("S1: Sentinel 가드레일 활성화 중…", "info");
+      try {
+        const grRes = await fetch(apiPath("/api/scenario/guardrail"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wsUrl: ws, token: tok, action: "on",
+            toolNames: ["ai_image_gen", "ai_model_check"],
+          }),
+        });
+        const grJ = (await grRes.json()) as { ok?: boolean; message?: string };
+        if (!grJ.ok) {
+          showHint(`가드레일 활성화 실패: ${grJ.message ?? "unknown"} — 시나리오를 계속 진행합니다.`, "err");
+        } else {
+          showHint("S1: 가드레일 활성화 완료 (ai_image_gen / ai_model_check 차단됨)", "ok");
+          await new Promise<void>((r) => window.setTimeout(r, 800));
+        }
+      } catch (e) {
+        showHint(`가드레일 오류: ${e instanceof Error ? e.message : String(e)} — 계속 진행합니다.`, "err");
+      }
     }
 
     let ps: PluginStatus | undefined = pluginStatuses[entry.id];

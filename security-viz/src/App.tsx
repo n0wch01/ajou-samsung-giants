@@ -190,6 +190,7 @@ export function App() {
               injectFrame={gw.injectFrame}
               onNavigate={navigate}
               connectedAt={gw.connectedAt}
+              clearKey={monitoringClearKey}
             />
           </section>
 

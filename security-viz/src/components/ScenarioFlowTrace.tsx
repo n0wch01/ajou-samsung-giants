@@ -5,6 +5,7 @@ import { apiPath } from "../lib/publicAsset";
 
 type RealtimeFinding = {
   id: string;
+  ruleId?: string;
   category?: string;
   title: string;
 };
@@ -12,11 +13,12 @@ type RealtimeFinding = {
 function useRealtimeFindings(active: boolean, clearKey: number | undefined): RealtimeFinding[] {
   const [findings, setFindings] = useState<RealtimeFinding[]>([]);
   const seenIds = useRef<Set<string>>(new Set());
+  const seenRuleIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     setFindings([]);
     seenIds.current = new Set();
-    // findings-realtime.jsonl은 서버에서 지우지 않음 — 모니터링 패널 누적 유지
+    seenRuleIds.current = new Set();
   }, [clearKey]);
 
   useEffect(() => {
@@ -27,10 +29,16 @@ function useRealtimeFindings(active: boolean, clearKey: number | undefined): Rea
         if (!res.ok) return;
         const json = (await res.json()) as { ok?: boolean; findings?: unknown[] };
         if (!json.ok || !Array.isArray(json.findings)) return;
-        const fresh = (json.findings as RealtimeFinding[]).filter(
-          (f) => f.id && !seenIds.current.has(f.id),
-        );
-        fresh.forEach((f) => seenIds.current.add(f.id));
+        // id 중복 + ruleId 중복 제거 (ingest.py + chat_stream.py 양쪽에서 같은 ruleId로 기록하는 경우)
+        const fresh = (json.findings as RealtimeFinding[]).filter((f) => {
+          if (!f.id || seenIds.current.has(f.id)) return false;
+          if (f.ruleId && seenRuleIds.current.has(f.ruleId)) return false;
+          return true;
+        });
+        fresh.forEach((f) => {
+          seenIds.current.add(f.id);
+          if (f.ruleId) seenRuleIds.current.add(f.ruleId);
+        });
         if (fresh.length > 0) setFindings((prev) => [...prev, ...fresh]);
       } catch { /* silent */ }
     };
@@ -1151,7 +1159,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
   const turn = useMemo(() => getLastScenarioTurn(entries, pluginApprovalMap), [entries, pluginApprovalMap]);
 
   const hasPluginTool = turn?.hasPluginTool ?? false;
-  const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3", turn?.at);
+  const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3" || scenarioId === "S2", turn?.at);
   const exfil = useExfilLog(hasPluginTool, turn?.at);
   // Vite 개발 서버에서만 게이트 API가 있음. turn 에 묶지 않음 — 타임라인 파싱 전에도 대기 건 표시.
   const fetchGate = useFetchGatePending(import.meta.env.DEV, turn?.at);
@@ -1203,24 +1211,16 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioF
         {turn && (
           <span className="ft-panel-time">{timeStr(turn.at)}</span>
         )}
-        {turn?.hasPluginTool && (
-          <span className="ft-badge-critical">CRITICAL</span>
+        {scenarioId === "S1" && turn?.hasPluginTool && (
+          <span className="ft-badge-success">S1 BLOCKED</span>
         )}
         {scenarioId === "S2" && turn?.hasEnvRead && (
-          <span className="ft-badge-critical">DATA LEAK</span>
+          <span className="ft-badge-success">S2 BLOCKED</span>
         )}
-        {scenarioId === "S3" && s3 && s3.verdict === "blocked" && (
+        {scenarioId === "S3" && s3 && (s3.verdict === "blocked" || s3.verdict === "fail") && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
             S3 BLOCKED
           </span>
-        )}
-        {scenarioId === "S3" && s3 && s3.verdict === "fail" && (
-          <span className="ft-badge-fail" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
-            S3 FAIL
-          </span>
-        )}
-        {scenarioId === "S2" && turn?.s2Verdict === "success" && (
-          <span className="ft-badge-success">S2 성공</span>
         )}
       </div>
 

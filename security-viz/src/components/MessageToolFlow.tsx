@@ -9,6 +9,7 @@ import { apiPath } from "../lib/publicAsset";
 import type { ConnState } from "../gateway/useGatewayReadonly";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 import type { NavAction } from "../App";
+import { useFindings, type SentinelFinding } from "../sentinel/useFindings";
 
 type MessageToolFlowProps = {
   entries: TimelineEntry[];
@@ -24,7 +25,42 @@ type MessageToolFlowProps = {
   onNavigate?: (action: NavAction) => void;
   /** connect()가 호출된 시각(ms). 이 시점 이전 이벤트는 히스토리 재전송분으로 숨긴다. */
   connectedAt?: number | null;
+  /** 바뀌면 누적된 findings 상태를 초기화 (Connect 재연결 등) */
+  clearKey?: number;
 };
+
+function blockedCategory(ruleId: string): string {
+  const id = ruleId.toLowerCase();
+  if (id.includes("s1") || id.includes("plugin") || id.includes("supply")) return "비승인 플러그인 탐지";
+  if (id.includes("s2") || id.includes("injection") || id.includes("readme") || id.includes("md") || id.includes("prompt")) return "악성 MD 탐지";
+  if (id.includes("s3") || id.includes("rate") || id.includes("abuse") || id.includes("loop")) return "API Abuse 탐지";
+  return "보안 위협 탐지";
+}
+
+function BlockedBubble({ finding, onNavigate }: { finding: SentinelFinding; onNavigate?: (a: NavAction) => void }) {
+  const catLabel = blockedCategory(finding.ruleId);
+  return (
+    <div className="kakao-blocked-notif">
+      <div className="kakao-blocked-icon">🚫</div>
+      <div className="kakao-blocked-body">
+        <div className="kakao-blocked-header">
+          <span className="kakao-blocked-title">보안 위협 탐지 및 차단됨</span>
+          <span className="kakao-blocked-cat">{catLabel}</span>
+        </div>
+        <div className="kakao-blocked-msg">{finding.title}</div>
+        {onNavigate && (
+          <button
+            type="button"
+            className="kakao-blocked-btn"
+            onClick={() => onNavigate({ tab: "monitoring", highlightFindingId: finding.id })}
+          >
+            Monitoring 탭에서 확인 →
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
 
 export type ToolLine = {
   id: string;
@@ -853,6 +889,71 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
     [liveEntries],
   );
 
+  // ── Sentinel 실시간 findings → BlockedBubble ──────────────────────────────
+  const { findings } = useFindings({ pollMs: 600, useSse: false, clearKey: props.clearKey });
+  const seenFindingIdsRef = useRef<Set<string>>(new Set());
+  const [blockedNotifs, setBlockedNotifs] = useState<SentinelFinding[]>([]);
+  const clearKeyTimeRef = useRef<number>(Date.now());
+
+  useEffect(() => {
+    setBlockedNotifs([]);
+    seenFindingIdsRef.current = new Set();
+    clearKeyTimeRef.current = Date.now();
+  }, [props.clearKey]);
+
+  useEffect(() => {
+    // 첫 유저 턴 이후 findings만 표시 — ingest 시작 시 생성된 배치 findings 제외
+    const firstTurnAt = turns.length > 0 ? turns[0].at : null;
+    if (!firstTurnAt) return; // 유저 메시지가 없으면 표시 안 함
+    const threshold = Math.max(
+      clearKeyTimeRef.current,
+      props.connectedAt ?? 0,
+      firstTurnAt,
+    );
+    // ruleId 기준 중복 제거 (같은 규칙이 배치+실시간 두 번 생성되는 경우)
+    const seenRuleIds = new Set(
+      [...seenFindingIdsRef.current].map((id) => {
+        const f = findings.find((x) => x.id === id);
+        return f?.ruleId ?? id;
+      }),
+    );
+    const newOnes = findings.filter((f) => {
+      if (!f._rt) return false; // 배치 findings 제외, realtime만 BlockedBubble에 표시
+      if (seenFindingIdsRef.current.has(f.id)) return false;
+      if (seenRuleIds.has(f.ruleId)) return false;
+      if (!f.timestamp) return false;
+      if (new Date(f.timestamp).getTime() < threshold) return false;
+      return true;
+    });
+    if (newOnes.length === 0) return;
+    newOnes.forEach((f) => {
+      seenFindingIdsRef.current.add(f.id);
+      seenRuleIds.add(f.ruleId);
+    });
+    setBlockedNotifs((prev) => [...prev, ...newOnes]);
+  }, [findings, props.connectedAt, turns]);
+
+  // finding 발생 시각 이후 에이전트 답변은 숨김 (공격 차단 시 에이전트 응답 표시 방지)
+  const firstBlockAt = useMemo(() => {
+    if (blockedNotifs.length === 0) return null;
+    const ts = blockedNotifs[0].timestamp;
+    return ts ? new Date(ts).getTime() : null;
+  }, [blockedNotifs]);
+
+  // turns + blockedNotifs를 시각순으로 병합, finding 이후 assistant 답변 숨김
+  const chatItems = useMemo(() => {
+    type TurnItem = { kind: "turn"; at: number; turn: (typeof turns)[number] };
+    type FindingItem = { kind: "finding"; at: number; finding: SentinelFinding };
+    const items: (TurnItem | FindingItem)[] = [
+      ...turns.map((t) => ({ kind: "turn" as const, at: t.at, turn: t })),
+      ...blockedNotifs
+        .filter((f) => f.timestamp)
+        .map((f) => ({ kind: "finding" as const, at: new Date(f.timestamp!).getTime(), finding: f })),
+    ];
+    items.sort((a, b) => a.at - b.at);
+    return items;
+  }, [turns, blockedNotifs]);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const userScrolledUp = useRef(false);
@@ -949,44 +1050,58 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
           </div>
         ) : null}
 
-        {turns.map((turn) => (
-          <div key={turn.id} className="kakao-turn">
-            <time className="kakao-time" dateTime={new Date(turn.at).toISOString()}>
-              {new Date(turn.at).toLocaleTimeString()}
-            </time>
-            <div className="kakao-row-user">
-              <div className="kakao-user-stack">
-                {turn.userMeta ? <div className="kakao-user-meta">{turn.userMeta}</div> : null}
-                <div className="kakao-bubble-user">{turn.userText}</div>
-              </div>
-            </div>
-            <div className="kakao-tools-block">
-              {turn.tools.length > 0 ? (
-                <>
-                  <div className="kakao-tools-caption">이 메시지 이후 호출된 도구</div>
-                  <ToolList
-                    tools={turn.tools}
-                    align="right"
-                    openToolId={openToolId}
-                    setOpenToolId={setOpenToolId}
-                  />
-                </>
-              ) : (
-                <div className="kakao-tools-none">연결된 도구 호출 기록 없음</div>
-              )}
-            </div>
-            {turn.assistantChunks.length > 0 ? (
-              <div className="kakao-row-assistant kakao-row-assistant-after-tools">
-                <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
-                <div className="kakao-bubble-assistant kakao-bubble-md">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {turn.assistantChunks.join("\n\n")}
-                  </ReactMarkdown>
+        {chatItems.map((item) => {
+          if (item.kind === "finding") {
+            return (
+              <BlockedBubble
+                key={`finding-${item.finding.id}`}
+                finding={item.finding}
+                onNavigate={props.onNavigate}
+              />
+            );
+          }
+          const turn = item.turn;
+          // 차단 finding이 하나라도 있으면 에이전트 응답 전체 숨김 (사전 텍스트 포함)
+          const suppressAssistant = firstBlockAt !== null && turn.assistantChunks.length > 0;
+          return (
+            <div key={turn.id} className="kakao-turn">
+              <time className="kakao-time" dateTime={new Date(turn.at).toISOString()}>
+                {new Date(turn.at).toLocaleTimeString()}
+              </time>
+              <div className="kakao-row-user">
+                <div className="kakao-user-stack">
+                  {turn.userMeta ? <div className="kakao-user-meta">{turn.userMeta}</div> : null}
+                  <div className="kakao-bubble-user">{turn.userText}</div>
                 </div>
               </div>
-            ) : null}
-          </div>
-        ))}
+              <div className="kakao-tools-block">
+                {turn.tools.length > 0 ? (
+                  <>
+                    <div className="kakao-tools-caption">이 메시지 이후 호출된 도구</div>
+                    <ToolList
+                      tools={turn.tools}
+                      align="right"
+                      openToolId={openToolId}
+                      setOpenToolId={setOpenToolId}
+                    />
+                  </>
+                ) : (
+                  <div className="kakao-tools-none">연결된 도구 호출 기록 없음</div>
+                )}
+              </div>
+              {turn.assistantChunks.length > 0 && !suppressAssistant ? (
+                <div className="kakao-row-assistant kakao-row-assistant-after-tools">
+                  <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
+                  <div className="kakao-bubble-assistant kakao-bubble-md">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {turn.assistantChunks.join("\n\n")}
+                    </ReactMarkdown>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
