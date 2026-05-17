@@ -530,6 +530,79 @@ class RealTimeRateDetector:
         return out
 
 
+class RealTimePatternDetector:
+    """
+    S1/S2 실시간 탐지: event_payload_regex 타입 규칙을 session.tool 이벤트에 적용.
+
+    패턴이 일치하는 순간 즉시 finding을 반환 → ingest.py가 sessions.abort를 호출.
+    """
+
+    def __init__(self, rules: list[dict[str, Any]]):
+        self._rules: list[dict[str, Any]] = []
+        for r in rules:
+            m = r.get("match")
+            if not isinstance(m, dict):
+                continue
+            if m.get("type") == "event_payload_regex":
+                self._rules.append(r)
+        self._fired: set[str] = set()
+
+    def reset(self) -> None:
+        self._fired.clear()
+
+    def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        if entry.get("entry_type") != "gateway_event":
+            return []
+        norm = entry.get("normalized")
+        if not isinstance(norm, dict) or norm.get("kind") != "session.tool":
+            return []
+        rec_text = json.dumps(entry, ensure_ascii=False)
+        out: list[dict[str, Any]] = []
+        for rule in self._rules:
+            rid = str(rule.get("id") or "")
+            if rid in self._fired:
+                continue
+            m = rule.get("match") or {}
+            target_event = m.get("event")
+            if target_event and target_event != "session.tool":
+                continue
+            pat = str(m.get("pattern") or "")
+            if not pat:
+                continue
+            try:
+                if re.search(pat, rec_text, re.IGNORECASE):
+                    self._fired.add(rid)
+                    out.append(
+                        _finding(
+                            rule_id=rid,
+                            severity=str(rule.get("severity") or "high"),
+                            title=str(rule.get("title") or rid),
+                            message=str(rule.get("message") or ""),
+                            recommended_action=str(rule.get("recommendedAction") or ""),
+                        )
+                    )
+            except re.error:
+                continue
+        return out
+
+
+class RealTimeCombinedDetector:
+    """RealTimeRateDetector + RealTimePatternDetector를 하나의 인터페이스로 묶음."""
+
+    def __init__(self, rules: list[dict[str, Any]]):
+        self._rate = RealTimeRateDetector(rules)
+        self._pattern = RealTimePatternDetector(rules)
+
+    def reset(self) -> None:
+        self._rate.reset()
+        self._pattern.reset()
+
+    def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        out = self._rate.process(entry)
+        out.extend(self._pattern.process(entry))
+        return out
+
+
 def run_detect(
     *,
     trace_path: Path,

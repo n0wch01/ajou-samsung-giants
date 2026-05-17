@@ -91,7 +91,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 from openclaw_ws import GwSession, parse_scopes_env, wall_time_ms  # noqa: E402
 
 # 실시간 자동 차단(rate_limit/loop_detect) wiring 용
-from sentinel.detect import RealTimeRateDetector, _load_yaml_rules  # noqa: E402
+from sentinel.detect import RealTimeCombinedDetector, RealTimeRateDetector, _load_yaml_rules  # noqa: E402
 
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
 _REALTIME_FINDINGS_FILENAME = "findings-realtime.jsonl"
@@ -222,7 +222,7 @@ async def _run_ingest_once(
     max_mb: float,
     snapshot_tools: bool,
     device_identity_path: str | None = None,
-    detector: RealTimeRateDetector | None = None,
+    detector: RealTimeCombinedDetector | None = None,
     auto_abort_min_rank: int = 3,
     abort_state: dict[str, Any] | None = None,
 ) -> None:
@@ -478,7 +478,7 @@ async def _run_ingest(
 
     # 실시간 detector + abort 상태는 reconnect를 가로질러 보존되어야 한다
     # (재연결 때마다 슬라이딩 윈도우/연속 카운터를 리셋하면 abort가 영원히 안 뜸).
-    detector: RealTimeRateDetector | None = None
+    detector: RealTimeCombinedDetector | None = None
     abort_state: dict[str, Any] = {"fired": False}
     auto_abort_min_rank = _SEVERITY_RANK.get(auto_abort_min_sev, 3)
     if auto_abort:
@@ -487,10 +487,11 @@ async def _run_ingest(
         scenario_prefix = os.environ.get("SENTINEL_SCENARIO_ID", "").strip().lower()
         if scenario_prefix:
             rules = [r for r in rules if str(r.get("id", "")).startswith(f"{scenario_prefix}-")]
-        detector = RealTimeRateDetector(rules)
+        detector = RealTimeCombinedDetector(rules)
         meta_line(
             f"auto-abort enabled (min_sev={auto_abort_min_sev}, rules_dir={rules_path}, "
-            f"rate_rules={len(detector._rate)}, loop_rules={len(detector._loop)})"
+            f"rate_rules={len(detector._rate._rate)}, loop_rules={len(detector._rate._loop)}, "
+            f"pattern_rules={len(detector._pattern._rules)})"
         )
 
     attempt = 0

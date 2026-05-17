@@ -11,6 +11,8 @@ export type SentinelFinding = {
   message: string;
   recommendedAction: string;
   timestamp?: string;
+  /** realtime finding (findings-realtime.jsonl 출처) — 배치 findings와 구별용 */
+  _rt?: boolean;
 };
 
 function normalizeFindings(body: unknown): SentinelFinding[] {

@@ -14,7 +14,7 @@ rules:
       도구별 최대 호출 횟수/종료 조건을 명시하세요.
     match:
       type: rate_limit
-      window_seconds: 30
+      window_seconds: 60
       max_calls: 3
       warning_threshold: 2
       # tools: []  # 비워두면 모든 도구 대상. 특정 도구만 보려면 지정.
@@ -48,4 +48,4 @@ rules:
       추가하세요(최대 N회, 결과 동일 시 중단 등).
     match:
       type: trace_line_regex
-      pattern: '(반복해|완벽할 때까지|무한|endless|infinite[ _-]?loop|retry[ _-]?forever|keep[ _-]?trying|재시도|계속 해|다시 시도)'
+      pattern: '(반복해|완벽할 때까지|완벽히.*때까지|때까지.*exec|멈추지 말고|계속 진행해|계속 해|무한|endless|infinite[ _-]?loop|retry[ _-]?forever|keep[ _-]?trying|재시도|다시 시도)'

@@ -308,18 +308,22 @@ type RateLimitPolicy = {
   windowSec: number;
 };
 
-function loadRateLimit(): RateLimitPolicy {
-  try {
-    const raw = localStorage.getItem("sg.policy.rateLimit");
-    if (raw) return JSON.parse(raw) as RateLimitPolicy;
-  } catch { /* ignore */ }
-  return { maxCalls: 10, windowSec: 30 };
-}
-
 function RateLimitSection({ highlightSection }: { highlightSection?: string | null }) {
-  const [policy, setPolicy] = useState<RateLimitPolicy>(loadRateLimit);
+  const [policy, setPolicy] = useState<RateLimitPolicy>({ maxCalls: 3, windowSec: 60 });
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(apiPath("/api/sentinel/rate-limit-policy"))
+      .then((r) => r.json())
+      .then((data: { ok: boolean; maxCalls?: number; windowSec?: number }) => {
+        if (data.ok && data.maxCalls !== undefined && data.windowSec !== undefined) {
+          setPolicy({ maxCalls: data.maxCalls, windowSec: data.windowSec });
+        }
+      })
+      .catch(() => { /* 서버 미실행 시 기본값 유지 */ });
+  }, []);
 
   useEffect(() => {
     if (highlightSection === "rateLimit" && ref.current) {
@@ -331,9 +335,22 @@ function RateLimitSection({ highlightSection }: { highlightSection?: string | nu
   }, [highlightSection]);
 
   const save = () => {
-    localStorage.setItem("sg.policy.rateLimit", JSON.stringify(policy));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setSaveError(null);
+    fetch(apiPath("/api/sentinel/rate-limit-policy"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxCalls: policy.maxCalls, windowSec: policy.windowSec }),
+    })
+      .then((r) => r.json())
+      .then((data: { ok: boolean; message?: string }) => {
+        if (data.ok) {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        } else {
+          setSaveError(data.message ?? "저장 실패");
+        }
+      })
+      .catch((e: unknown) => setSaveError(String(e)));
   };
 
   return (
@@ -375,6 +392,7 @@ function RateLimitSection({ highlightSection }: { highlightSection?: string | nu
             저장
           </button>
           {saved && <span className="policy-rl-saved">✓ 저장되었습니다</span>}
+          {saveError && <span className="policy-rl-error">{saveError}</span>}
         </div>
         <p className="policy-rl-hint">
           현재 설정: {policy.windowSec}초 내 동일 도구 {policy.maxCalls}회 초과 시 탐지
