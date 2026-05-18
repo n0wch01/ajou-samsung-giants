@@ -78,3 +78,88 @@ rules:
     match:
       type: trace_line_regex
       pattern: '(?i)(env-snapshot|\.env.*읽|읽.*\.env|env.*파일.*읽|단계별.*지시)'
+
+  # APIToken — RegHex 기반 클라우드/SaaS 토큰 패턴 (Vigil ContainsAPIToken 포팅)
+  - id: md-vigil-api-tokens
+    severity: high
+    title: API 토큰/자격증명 노출 감지 (Vigil ContainsAPIToken)
+    message: >-
+      AWS/Azure/GCP/Slack/Stripe/Twilio 등 주요 클라우드·SaaS의 API 키 형식이
+      입력에서 감지됐습니다. 자격증명 유출 또는 인젝션 페이로드 가능성이 있습니다.
+    recommendedAction: >-
+      해당 토큰을 즉시 회수(rotate)하고 노출 경로를 점검하세요. 외부 문서에서
+      유래한 경우 인젝션 페이로드일 가능성도 함께 의심하세요.
+    match:
+      type: trace_line_regex
+      pattern: '(A3T[A-Z0-9]|AKIA|AGPA|AIDA|AROA|AIPA|ANPA|ANVA|ASIA)[A-Z0-9]{16}|amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|da2-[a-z0-9]{26}|AKC[a-zA-Z0-9]{10,}|AP[\dABCDEF][a-zA-Z0-9]{8,}|AZURE[A-Za-z0-9]{12}|EAACEdEose0cBA[0-9A-Za-z]+|AIza[0-9A-Za-z\-_]{35}|ya29\.[0-9A-Za-z\-_]+|[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com|linkedin(.{0,20})?[''"][0-9a-z]{16}|[0-9a-f]{32}-us[0-9]{1,2}|key-[0-9a-zA-Z]{32}|xox[pborsa]-[0-9]{12}-[0-9]{12}-[0-9]{12}-[a-z0-9]{32}|https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}|sk_live_[0-9a-zA-Z]{24}|rk_live_[0-9a-zA-Z]{24}|sqOatp-[0-9A-Za-z\-_]{22}|sq0csp-[0-9A-Za-z\-_]{43}|[0-9]+:AA[0-9A-Za-z\-_]{33}|SK[0-9a-fA-F]{32}'
+
+  # GenericSecret — 일반 시크릿 키워드 (Vigil ContainsGenericSecretPhrase 포팅)
+  - id: md-vigil-generic-secret
+    severity: medium
+    title: 일반 시크릿 키워드 감지 (Vigil ContainsGenericSecretPhrase)
+    message: >-
+      "private/secret/access (key|token|password|pass)" 형식의 일반 시크릿
+      키워드가 감지됐습니다. 외부 문서에 시크릿이 포함됐거나, 시크릿 추출을
+      유도하는 인젝션일 가능성이 있습니다.
+    recommendedAction: >-
+      해당 컨텍스트가 실제 시크릿을 포함하는지 검토하고, 외부 문서에서 유래한
+      경우 인젝션 페이로드 가능성을 의심하세요.
+    match:
+      type: trace_line_regex
+      pattern: '(private|secret|access)\s(key|token|password|pass)'
+
+  # IPv4 — SSRF 등 네트워크 인젝션에 악용 가능한 IP (Vigil ContainsIPv4 포팅)
+  - id: md-vigil-ipv4
+    severity: low
+    title: IPv4 주소 감지 (Vigil ContainsIPv4)
+    message: >-
+      IPv4 주소가 문서에서 감지됐습니다. SSRF 등 네트워크 인젝션 페이로드일
+      가능성이 있습니다.
+    recommendedAction: >-
+      해당 IP가 외부 네트워크 호출에 사용될 가능성이 있다면 사전에 차단하고,
+      네트워크 egress 정책을 점검하세요.
+    match:
+      type: trace_line_regex
+      pattern: '\b(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)){3}\b'
+
+  # ReAct(JSON) — ReAct 에이전트 사고 흐름 위장 (Vigil ContainsReAct 포팅)
+  - id: md-vigil-react-injection
+    severity: high
+    title: ReAct 사고/행동 인젝션 감지 (Vigil ContainsReAct)
+    message: >-
+      ReAct 프레임워크의 "Thought/Action" 토큰이 JSON 구조와 함께 감지됐습니다.
+      에이전트 사고 흐름을 위장한 프롬프트 인젝션 시도일 수 있습니다.
+    recommendedAction: >-
+      해당 입력을 격리하고 에이전트에 직접 전달하지 마세요. 외부 문서의
+      ReAct 토큰을 이스케이프하거나 제거하세요.
+    match:
+      type: trace_line_regex
+      pattern: '(Thought|Action):\s*```(json)?\s*\{\s*"action"\s*:\s*"[^"]+"'
+
+  # ReAct(plaintext) — 평문 Thought/Action/Observation 흐름 (Vigil ContainsReAct_txt 포팅)
+  - id: md-vigil-react-text
+    severity: medium
+    title: ReAct 평문 흐름 감지 (Vigil ContainsReAct_txt)
+    message: >-
+      문서 내에서 "Thought:/Action:/Action Input:/Observation:" 등 ReAct
+      에이전트 흐름을 흉내내는 평문 패턴이 감지됐습니다.
+    recommendedAction: >-
+      에이전트 흐름을 위장한 인젝션 시도일 수 있으므로 해당 섹션을 제거하거나
+      raw text로만 전달하세요.
+    match:
+      type: trace_line_regex
+      pattern: '(?m)^(Thought|Action|Action Input|Observation):\s+\w'
+
+  # SSHKey — SSH 개인키 PEM 헤더 (Vigil ContainsSSHKey 포팅)
+  - id: md-vigil-ssh-private-key
+    severity: critical
+    title: SSH 개인키 헤더 감지 (Vigil ContainsSSHKey)
+    message: >-
+      SSH 개인키 PEM 헤더가 문서에서 감지됐습니다. 자격증명 유출 또는 키
+      이식·치환 인젝션 가능성이 있습니다.
+    recommendedAction: >-
+      해당 키를 즉시 회수하고 노출 경로를 점검하세요. 외부 문서에서 유래한
+      경우 키 이식·치환 인젝션 가능성도 함께 의심하세요.
+    match:
+      type: trace_line_regex
+      pattern: '-----BEGIN ((EC|PGP|DSA|RSA|OPENSSH) )?PRIVATE KEY( BLOCK)?-----'

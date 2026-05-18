@@ -9,10 +9,12 @@ dev server /api/scenario/chat-stream 에서 실행됨.
     없으면 즉시 차단 + finding(ruleId="whitelist-violation").
   - 악성 MD 탐지: 파일 읽기 도구가 .md 파일을 읽으려 하면 Sentinel이 독립적으로
     파일을 읽고 Vigil 시그니처(md_signatures.yaml의 룰)와 매칭.
-    일치 시 즉시 차단 + finding(ruleId="md-signature-block").
+    high/critical/medium 일치 시 즉시 차단 + finding(ruleId="md-signature-block").
+    low 일치 시 finding(ruleId="md-signature-warn") + 스트림 경고만 (차단 없음).
 """
 from __future__ import annotations
 import asyncio, json, os, re, sys, time as _time, uuid
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,16 @@ MD_SIGNATURES_PATH = SENTINEL_RULES_DIR / "md_signatures.yaml"
 _READ_TOOL_PATTERN = re.compile(r"^(read|read_file|fs[._]read|file[._]read|cat|view)$", re.IGNORECASE)
 
 
+@dataclass(frozen=True)
+class MdSignatureRule:
+    id: str
+    pattern: re.Pattern[str]
+    severity: str
+    title: str
+    message: str
+    recommended_action: str
+
+
 def _load_whitelist() -> set[str]:
     """화이트리스트(baseline tool names) 로드. 파일 없으면 빈 set."""
     try:
@@ -45,9 +57,9 @@ def _load_whitelist() -> set[str]:
     return set()
 
 
-def _load_md_signatures() -> list[tuple[str, re.Pattern]]:
-    """md_signatures.yaml의 정규식 패턴을 (rule_id, compiled_re) 리스트로 반환."""
-    sigs: list[tuple[str, re.Pattern]] = []
+def _load_md_signatures() -> list[MdSignatureRule]:
+    """md_signatures.yaml 규칙을 로드한다."""
+    sigs: list[MdSignatureRule] = []
     try:
         import yaml  # type: ignore
         with MD_SIGNATURES_PATH.open("r", encoding="utf-8") as f:
@@ -61,7 +73,14 @@ def _load_md_signatures() -> list[tuple[str, re.Pattern]]:
             if not pat:
                 continue
             try:
-                sigs.append((rid, re.compile(str(pat), re.IGNORECASE)))
+                sigs.append(MdSignatureRule(
+                    id=rid,
+                    pattern=re.compile(str(pat), re.IGNORECASE),
+                    severity=str(rule.get("severity") or "medium").lower(),
+                    title=str(rule.get("title") or rid),
+                    message=str(rule.get("message") or ""),
+                    recommended_action=str(rule.get("recommendedAction") or ""),
+                ))
             except re.error:
                 continue
     except Exception:
@@ -146,6 +165,7 @@ async def main() -> None:
     whitelist = _load_whitelist()
     md_signatures = _load_md_signatures()
     blocked_once = False  # 한 세션에서 차단은 한 번만
+    warned_md_keys: set[tuple[str, str]] = set()  # (rule_id, file_path) — low 경고 중복 방지
     realtime_findings_path = SENTINEL_DATA_DIR / "findings-realtime.jsonl"
 
     sess = await GwSession.connect(
@@ -171,8 +191,8 @@ async def main() -> None:
     last_event_ts: list[float] = [0.0]
     seen_non_user_msg: list[bool] = [False]
 
-    async def _write_block_finding(rule_id: str, severity: str, title: str, message: str, recommended: str) -> None:
-        """findings-realtime.jsonl에 차단 finding을 즉시 기록하고 스트림을 종료한다."""
+    async def _append_finding(rule_id: str, severity: str, title: str, message: str, recommended: str) -> None:
+        """findings-realtime.jsonl에 finding만 기록한다 (세션 abort 없음)."""
         finding = {
             "id": str(uuid.uuid4()),
             "ruleId": rule_id,
@@ -188,23 +208,27 @@ async def main() -> None:
                 f.write(json.dumps(finding, ensure_ascii=False) + "\n")
         except Exception:
             pass
+
+    async def _write_block_finding(rule_id: str, severity: str, title: str, message: str, recommended: str) -> None:
+        """findings-realtime.jsonl에 차단 finding을 즉시 기록하고 스트림을 종료한다."""
+        await _append_finding(rule_id, severity, title, message, recommended)
         done_event.set()
         try:
             await sess.rpc("sessions.abort", {"key": session_key}, timeout_s=5.0)
         except Exception:
             pass
 
-    def _check_md_signature(file_path: Path) -> str | None:
-        """파일 내용에 Vigil 시그니처가 일치하면 그 rule_id 반환, 아니면 None."""
+    def _check_md_signature(file_path: Path) -> MdSignatureRule | None:
+        """파일 내용에 Vigil 시그니처가 일치하면 해당 규칙 반환, 아니면 None."""
         if not md_signatures:
             return None
         try:
             content = file_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             return None
-        for rid, cre in md_signatures:
-            if cre.search(content):
-                return rid
+        for rule in md_signatures:
+            if rule.pattern.search(content):
+                return rule
         return None
 
     async def on_event(msg: dict) -> None:
@@ -235,18 +259,47 @@ async def main() -> None:
                 if raw_path.lower().endswith(".md"):
                     resolved = _resolve_md_path(raw_path)
                     if resolved is not None:
-                        matched_sig = _check_md_signature(resolved)
-                        if matched_sig:
-                            blocked_once = True
-                            print(json.dumps(msg, ensure_ascii=False), flush=True)
-                            asyncio.ensure_future(_write_block_finding(
-                                rule_id="md-signature-block",
-                                severity="high",
-                                title="악성 MD 탐지 — 인젝션 시그니처 차단",
-                                message=f"파일 '{raw_path}'에서 인젝션 시그니처 '{matched_sig}' 감지로 차단되었습니다.",
-                                recommended="신뢰할 수 없는 마크다운 문서를 에이전트에 전달하지 마세요.",
-                            ))
-                            return
+                        matched = _check_md_signature(resolved)
+                        if matched:
+                            if matched.severity == "low":
+                                warn_key = (matched.id, raw_path)
+                                if warn_key not in warned_md_keys:
+                                    warned_md_keys.add(warn_key)
+                                    print(json.dumps({
+                                        "type": "warn",
+                                        "ruleId": matched.id,
+                                        "file": raw_path,
+                                        "message": (
+                                            f"파일 '{raw_path}'에서 시그니처 '{matched.id}' "
+                                            f"(severity={matched.severity}) 감지 — 경고만, 차단 없음."
+                                        ),
+                                    }, ensure_ascii=False), flush=True)
+                                    asyncio.ensure_future(_append_finding(
+                                        rule_id="md-signature-warn",
+                                        severity=matched.severity,
+                                        title=matched.title,
+                                        message=(
+                                            f"파일 '{raw_path}'에서 시그니처 '{matched.id}' "
+                                            f"감지 (low — 경고만, 차단 없음)."
+                                        ),
+                                        recommended=matched.recommended_action
+                                        or "해당 IP·네트워크 참조가 의도된 것인지 검토하세요.",
+                                    ))
+                            else:
+                                blocked_once = True
+                                print(json.dumps(msg, ensure_ascii=False), flush=True)
+                                asyncio.ensure_future(_write_block_finding(
+                                    rule_id="md-signature-block",
+                                    severity=matched.severity,
+                                    title=matched.title,
+                                    message=(
+                                        f"파일 '{raw_path}'에서 인젝션 시그니처 "
+                                        f"'{matched.id}' 감지로 차단되었습니다."
+                                    ),
+                                    recommended=matched.recommended_action
+                                    or "신뢰할 수 없는 마크다운 문서를 에이전트에 전달하지 마세요.",
+                                ))
+                                return
 
         if done_event.is_set():
             return

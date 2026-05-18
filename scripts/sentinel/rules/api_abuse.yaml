@@ -16,8 +16,8 @@ rules:
     match:
       type: rate_limit
       window_seconds: 60
-      max_calls: 3
-      warning_threshold: 2
+      max_calls: 5
+      warning_threshold: 5
       # tools: []  # 비워두면 모든 도구 대상. 특정 도구만 보려면 지정.
 
   # ── L2: 동일 인자 연속 호출 (loop_detect) ────────────────────────────────────
