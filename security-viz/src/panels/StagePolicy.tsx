@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { apiPath } from "../lib/publicAsset";
 
 // ── tools.catalog 파싱 ────────────────────────────────────────────────────
@@ -20,8 +20,16 @@ type CatalogGroup = {
 };
 
 function extractGroups(data: unknown): CatalogGroup[] {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
-  const o = data as Record<string, unknown>;
+  let root = data;
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    const o = root as Record<string, unknown>;
+    if (!Array.isArray(o.groups) && o.payload && typeof o.payload === "object" && !Array.isArray(o.payload)) {
+      const inner = o.payload as Record<string, unknown>;
+      if (Array.isArray(inner.groups)) root = o.payload;
+    }
+  }
+  if (!root || typeof root !== "object" || Array.isArray(root)) return [];
+  const o = root as Record<string, unknown>;
   const groups = o.groups;
   if (!Array.isArray(groups)) return [];
   return groups
@@ -44,9 +52,23 @@ function extractGroups(data: unknown): CatalogGroup[] {
     .filter((g) => g.id);
 }
 
-function ToolsCatalogView({ data }: { data: unknown }) {
+function ToolsCatalogView({
+  data,
+  highlightToolId,
+  wsUrl,
+  token,
+  onRefreshCatalog,
+}: {
+  data: unknown;
+  highlightToolId?: string | null;
+  wsUrl?: string;
+  token?: string;
+  onRefreshCatalog?: () => void;
+}) {
   const [search, setSearch] = useState("");
   const [openGroup, setOpenGroup] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const groups = extractGroups(data);
   const q = search.toLowerCase();
 
@@ -61,6 +83,39 @@ function ToolsCatalogView({ data }: { data: unknown }) {
 
   const totalTools = groups.reduce((s, g) => s + g.tools.length, 0);
 
+  useEffect(() => {
+    if (highlightToolId) {
+      const match = groups.find(
+        (g) => g.id === highlightToolId || g.pluginId === highlightToolId ||
+          g.tools.some((t) => t.id === highlightToolId)
+      );
+      if (match) {
+        setOpenGroup(match.id);
+        setTimeout(() => {
+          highlightRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }, 100);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightToolId]);
+
+  const handleDelete = useCallback(async (group: CatalogGroup) => {
+    const pluginId = group.pluginId ?? group.id;
+    setDeletingId(group.id);
+    try {
+      const ws = (wsUrl ?? "").trim();
+      const tok = (token ?? "").trim();
+      const url = apiPath(`/api/policy/plugin-delete?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}&pluginId=${encodeURIComponent(pluginId)}`);
+      const res = await fetch(url, { method: "POST" });
+      const j = (await res.json()) as { ok?: boolean; message?: string };
+      if (j.ok) onRefreshCatalog?.();
+    } catch {
+      // silent
+    } finally {
+      setDeletingId(null);
+    }
+  }, [wsUrl, token, onRefreshCatalog]);
+
   if (groups.length === 0) {
     return <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>도구 그룹을 찾을 수 없습니다.</p>;
   }
@@ -73,7 +128,7 @@ function ToolsCatalogView({ data }: { data: unknown }) {
         </span>
         <input
           className="policy-search"
-          placeholder="도구 이름 또는 설명 검색…"
+          placeholder="도구 이름 또는 설명으로 검색…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -85,22 +140,44 @@ function ToolsCatalogView({ data }: { data: unknown }) {
         {filteredGroups.map((g) => {
           const isOpen = openGroup === g.id;
           const isPlugin = g.source === "plugin";
+          const isHighlighted = highlightToolId !== null && highlightToolId !== undefined &&
+            (g.id === highlightToolId || g.pluginId === highlightToolId ||
+              g.tools.some((t) => t.id === highlightToolId));
+          const isDeleting = deletingId === g.id;
+
           return (
-            <div key={g.id} className={`policy-tool-card${isPlugin ? " policy-tool-card-plugin" : ""}`}>
-              <button
-                type="button"
-                className="policy-tool-card-header"
-                onClick={() => setOpenGroup(isOpen ? null : g.id)}
-              >
-                <span className="policy-tool-name">{g.label}</span>
-                <span className={`policy-tool-source${isPlugin ? " policy-tool-source-plugin" : ""}`}>
-                  {isPlugin ? `플러그인: ${g.pluginId ?? g.label}` : g.source}
-                </span>
-                <span className="policy-tool-source" style={{ marginLeft: "auto" }}>
-                  {g.tools.length}개
-                </span>
-                <span className="policy-tool-chev">{isOpen ? "▲" : "▼"}</span>
-              </button>
+            <div
+              key={g.id}
+              ref={isHighlighted ? highlightRef : undefined}
+              className={`policy-tool-card${isPlugin ? " policy-tool-card-plugin" : ""}${isHighlighted ? " policy-tool-card-highlight" : ""}`}
+            >
+              <div className="policy-tool-card-header-row">
+                <button
+                  type="button"
+                  className="policy-tool-card-header"
+                  onClick={() => setOpenGroup(isOpen ? null : g.id)}
+                >
+                  <span className="policy-tool-name">{g.label}</span>
+                  <span className={`policy-tool-source${isPlugin ? " policy-tool-source-plugin" : ""}`}>
+                    {isPlugin ? `플러그인: ${g.pluginId ?? g.label}` : g.source}
+                  </span>
+                  <span className="policy-tool-source" style={{ marginLeft: "auto" }}>
+                    {g.tools.length}개
+                  </span>
+                  <span className="policy-tool-chev">{isOpen ? "▲" : "▼"}</span>
+                </button>
+                {isPlugin && (
+                  <button
+                    type="button"
+                    className="policy-plugin-delete-btn"
+                    disabled={isDeleting}
+                    onClick={() => void handleDelete(g)}
+                  >
+                    {isDeleting ? "삭제 중…" : "삭제"}
+                  </button>
+                )}
+              </div>
+
               {isOpen && (
                 <div className="policy-group-tools">
                   {g.tools.map((t) => (
@@ -167,10 +244,17 @@ function ConfigValueCell({ value }: { value: unknown }) {
 
 function ConfigView({ data }: { data: unknown }) {
   const [filter, setFilter] = useState("");
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
+  let root: unknown = data;
+  if (root && typeof root === "object" && !Array.isArray(root)) {
+    const o = root as Record<string, unknown>;
+    if (o.type === "res" && o.payload !== undefined && typeof o.payload === "object" && !Array.isArray(o.payload)) {
+      root = o.payload;
+    }
+  }
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
     return <pre className="policy-raw-pre" style={{ marginTop: 8 }}>{JSON.stringify(data, null, 2)}</pre>;
   }
-  const rows = flattenConfig(data);
+  const rows = flattenConfig(root);
   const q = filter.toLowerCase();
   const visible = q ? rows.filter((r) => r.path.toLowerCase().includes(q)) : rows;
 
@@ -206,7 +290,7 @@ function ConfigView({ data }: { data: unknown }) {
   );
 }
 
-// ── tools.effective diff ──────────────────────────────────────────────────
+// ── tools.effective diff 타입 ─────────────────────────────────────────────
 
 type DiffResult = {
   baseline: string[];
@@ -217,66 +301,105 @@ type DiffResult = {
   tracePath: string;
 };
 
-function ToolsDiffSection() {
-  const [diff, setDiff] = useState<DiffResult | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+// ── API Abuse 정책 (Rate Limit 설정) ─────────────────────────────────────
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(apiPath("/api/sentinel/tools-diff"));
-      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-      const data = (await res.json()) as DiffResult & { ok?: boolean };
-      setDiff(data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setDiff(null);
-    } finally {
-      setLoading(false);
-    }
+type RateLimitPolicy = {
+  maxCalls: number;
+  windowSec: number;
+};
+
+function RateLimitSection({ highlightSection }: { highlightSection?: string | null }) {
+  const [policy, setPolicy] = useState<RateLimitPolicy>({ maxCalls: 3, windowSec: 60 });
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    fetch(apiPath("/api/sentinel/rate-limit-policy"))
+      .then((r) => r.json())
+      .then((data: { ok: boolean; maxCalls?: number; windowSec?: number }) => {
+        if (data.ok && data.maxCalls !== undefined && data.windowSec !== undefined) {
+          setPolicy({ maxCalls: data.maxCalls, windowSec: data.windowSec });
+        }
+      })
+      .catch(() => { /* 서버 미실행 시 기본값 유지 */ });
   }, []);
 
+  useEffect(() => {
+    if (highlightSection === "rateLimit" && ref.current) {
+      ref.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      ref.current.classList.add("policy-rl-highlight");
+      const t = setTimeout(() => ref.current?.classList.remove("policy-rl-highlight"), 2000);
+      return () => clearTimeout(t);
+    }
+  }, [highlightSection]);
+
+  const save = () => {
+    setSaveError(null);
+    fetch(apiPath("/api/sentinel/rate-limit-policy"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ maxCalls: policy.maxCalls, windowSec: policy.windowSec }),
+    })
+      .then((r) => r.json())
+      .then((data: { ok: boolean; message?: string }) => {
+        if (data.ok) {
+          setSaved(true);
+          setTimeout(() => setSaved(false), 2000);
+        } else {
+          setSaveError(data.message ?? "저장 실패");
+        }
+      })
+      .catch((e: unknown) => setSaveError(String(e)));
+  };
+
   return (
-    <div style={{ marginTop: 20 }}>
-      <h3>tools.effective — 베이스라인 diff</h3>
-      <div className="row" style={{ marginBottom: 8 }}>
-        <button type="button" disabled={loading} onClick={() => void load()}>
-          {loading ? "비교 중..." : "베이스라인 diff 실행"}
-        </button>
-      </div>
-      {error ? <p className="muted" style={{ color: "var(--warn)" }}>{error}</p> : null}
-      {diff ? (
-        <div className="stack" style={{ gap: 10 }}>
-          <p className="muted" style={{ fontSize: "0.75rem" }}>
-            baseline {diff.baseline.length}개 / current {diff.current.length}개
-          </p>
-          {diff.added.length === 0 && diff.removed.length === 0 ? (
-            <p className="muted">차이 없음 — 현재 tools.effective가 베이스라인과 일치합니다.</p>
-          ) : null}
-          {diff.added.length > 0 ? (
-            <div>
-              <strong style={{ color: "var(--warn)" }}>추가된 도구 ({diff.added.length})</strong>
-              <div className="diff-chip-row">
-                {diff.added.map((n) => (
-                  <code key={n} className="diff-chip diff-chip-added">{n}</code>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          {diff.removed.length > 0 ? (
-            <div>
-              <strong style={{ color: "var(--muted)" }}>제거된 도구 ({diff.removed.length})</strong>
-              <div className="diff-chip-row">
-                {diff.removed.map((n) => (
-                  <code key={n} className="diff-chip diff-chip-removed">{n}</code>
-                ))}
-              </div>
-            </div>
-          ) : null}
+    <div ref={ref} className="pl-check-card policy-rl-card" id="policy-rate-limit">
+      <div className="pl-check-card-header">
+        <div className="pl-check-info">
+          <span className="pl-check-title">API Abuse 탐지 정책</span>
+          <code className="pl-check-method">rate-limit</code>
+          <span className="pl-check-desc">도구 호출 횟수 초과 시 탐지합니다.</span>
         </div>
-      ) : null}
+      </div>
+      <div className="policy-rl-body">
+        <div className="policy-rl-row">
+          <label className="policy-rl-label">최대 호출 횟수</label>
+          <input
+            type="number"
+            min={0}
+            max={1000}
+            className="policy-rl-input"
+            value={policy.maxCalls}
+            onChange={(e) => setPolicy((p) => ({ ...p, maxCalls: Number(e.target.value) }))}
+          />
+          <span className="policy-rl-unit">회 <span className="policy-rl-hint-inline">(0 = 무제한)</span></span>
+        </div>
+        <div className="policy-rl-row">
+          <label className="policy-rl-label">시간 범위</label>
+          <input
+            type="number"
+            min={1}
+            max={3600}
+            className="policy-rl-input"
+            value={policy.windowSec}
+            onChange={(e) => setPolicy((p) => ({ ...p, windowSec: Number(e.target.value) }))}
+          />
+          <span className="policy-rl-unit">초 내</span>
+        </div>
+        <div className="policy-rl-actions">
+          <button type="button" className="sc-btn-primary" onClick={save}>
+            저장
+          </button>
+          {saved && <span className="policy-rl-saved">✓ 저장되었습니다</span>}
+          {saveError && <span className="policy-rl-error">{saveError}</span>}
+        </div>
+        <p className="policy-rl-hint">
+          {policy.maxCalls === 0
+            ? "현재 설정: 무제한 — Rate Limit 탐지가 비활성화됩니다."
+            : `현재 설정: ${policy.windowSec}초 내 동일 도구 ${policy.maxCalls}회 초과 시 탐지`}
+        </p>
+      </div>
     </div>
   );
 }
@@ -290,7 +413,12 @@ export type StagePolicyProps = {
   catalogError: string | null;
   onRefreshConfig: () => void;
   onRefreshCatalog: () => void;
-  busy: boolean;
+  configBusy: boolean;
+  catalogBusy: boolean;
+  highlightToolId?: string | null;
+  highlightSection?: string | null;
+  wsUrl?: string;
+  token?: string;
 };
 
 export function StagePolicy(props: StagePolicyProps) {
@@ -298,50 +426,317 @@ export function StagePolicy(props: StagePolicyProps) {
   const catalog = props.catalogPayload;
   const cfgErr = props.configError;
   const catErr = props.catalogError;
+  const cfgBusy = props.configBusy;
+  const catBusy = props.catalogBusy;
+
+  const [diff, setDiff] = useState<DiffResult | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState<string | null>(null);
+
+  const [cfgExpanded, setCfgExpanded] = useState(false);
+  const [catExpanded, setCatExpanded] = useState(false);
+  const [diffExpanded, setDiffExpanded] = useState(false);
+  const [baselineExpanded, setBaselineExpanded] = useState(false);
+
+  useEffect(() => {
+    if (props.highlightSection === "catalog") {
+      setCatExpanded(true);
+    }
+  }, [props.highlightSection]);
+
+  const loadDiff = useCallback(async () => {
+    setDiffLoading(true);
+    setDiffError(null);
+    try {
+      const params = new URLSearchParams();
+      if (props.wsUrl) params.set("wsUrl", props.wsUrl);
+      if (props.token) params.set("token", props.token);
+      const qs = params.toString() ? `?${params.toString()}` : "";
+      const res = await fetch(apiPath(`/api/sentinel/tools-diff${qs}`));
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+      const data = (await res.json()) as DiffResult & { ok?: boolean };
+      setDiff(data);
+    } catch (e) {
+      setDiffError(e instanceof Error ? e.message : String(e));
+      setDiff(null);
+    } finally {
+      setDiffLoading(false);
+    }
+  }, [props.wsUrl, props.token]);
+
+  const configLoaded = cfg !== undefined && !cfgErr;
+  const catalogLoaded = catalog !== undefined && !catErr;
+  const toolCount = catalogLoaded ? extractGroups(catalog).reduce((s, g) => s + g.tools.length, 0) : null;
+  const dangerCount = diff ? diff.added.length + diff.removed.length : null;
+
+  const policyStatus = configLoaded ? "정상" : "미확인";
+  const policyStatusClass = configLoaded ? "pl-val-ok" : "pl-val-muted";
+  const dangerClass = dangerCount !== null && dangerCount > 0 ? "pl-val-danger" : dangerCount === 0 ? "pl-val-ok" : "pl-val-muted";
+
+  const cfgStatus = cfgBusy ? "확인 중..." : cfgErr ? "오류" : cfg !== undefined ? "완료" : "미확인";
+  const cfgChipClass = cfgBusy ? "pl-chip-checking" : cfgErr ? "pl-chip-danger" : cfg !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+
+  const catStatus = catBusy ? "확인 중..." : catErr ? "오류" : catalog !== undefined ? "완료" : "미확인";
+  const catChipClass = catBusy ? "pl-chip-checking" : catErr ? "pl-chip-danger" : catalog !== undefined ? "pl-chip-ok" : "pl-chip-muted";
+
+  const diffStatus = diffError ? "오류" : diffLoading ? "비교 중..." : diff !== null ? "완료" : "대기 중";
+  const diffChipClass = diffError ? "pl-chip-danger" : diffLoading ? "pl-chip-checking" : diff !== null ? "pl-chip-ok" : "pl-chip-waiting";
+
+  const anyResult = configLoaded || catalogLoaded || diff !== null || cfgErr || catErr || diffError;
 
   return (
-    <div className="panel">
-      <h2>정책 검사</h2>
-      <div className="row" style={{ marginBottom: 10 }}>
-        <button type="button" disabled={props.busy} onClick={props.onRefreshConfig}>
-          config.get 새로고침
-        </button>
-        <button type="button" disabled={props.busy} onClick={props.onRefreshCatalog}>
-          tools.catalog 새로고침
-        </button>
+    <div className="sc-page">
+
+      {/* ── 페이지 헤더 ── */}
+      <div className="sc-page-header">
+        <div className="sc-page-title-wrap">
+          <h2 className="sc-page-title">Policy</h2>
+          <p className="sc-page-desc">보안 정책 설정</p>
+        </div>
+        <div className="sc-status-bar">
+          <div className="sc-status-item">
+            <span className="sc-status-label">정책 상태</span>
+            <span className={`sc-status-value ${policyStatusClass}`}>{policyStatus}</span>
+          </div>
+          <div className="sc-status-divider" />
+          <div className="sc-status-item">
+            <span className="sc-status-label">등록 도구</span>
+            <span className="sc-status-value">{toolCount !== null ? toolCount : "—"}</span>
+          </div>
+          <div className="sc-status-divider" />
+          <div className="sc-status-item">
+            <span className="sc-status-label">위험 변경</span>
+            <span className={`sc-status-value ${dangerClass}`}>
+              {dangerCount !== null ? dangerCount : "—"}
+            </span>
+          </div>
+        </div>
       </div>
 
-      <details className="policy-section" open>
-        <summary className="policy-section-summary">
-          config.get
-          {cfg !== undefined
-            ? <span className="policy-section-badge ok">로드됨</span>
-            : <span className="policy-section-badge empty">없음</span>}
-        </summary>
-        {cfgErr
-          ? <p className="policy-fetch-error">오류: {cfgErr}</p>
-          : cfg === undefined
-            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-            : <ConfigView data={cfg} />}
-      </details>
+      {/* ── API Abuse 탐지 정책 ── */}
+      <RateLimitSection highlightSection={props.highlightSection} />
 
-      <details className="policy-section">
-        <summary className="policy-section-summary">
-          tools.catalog
-          {catalog !== undefined
-            ? <span className="policy-section-badge ok">
-                {extractGroups(catalog).reduce((s, g) => s + g.tools.length, 0)}개 도구
-              </span>
-            : <span className="policy-section-badge empty">없음</span>}
-        </summary>
-        {catErr
-          ? <p className="policy-fetch-error">오류: {catErr}</p>
-          : catalog === undefined
-            ? <p className="muted" style={{ marginTop: 8, fontSize: "0.82rem" }}>연결 후 새로고침을 클릭하세요.</p>
-            : <ToolsCatalogView data={catalog} />}
-      </details>
+      {/* ── 검사 항목 ── */}
+      <h3 className="pl-section-title">검사 항목</h3>
+      <div className="pl-check-list">
 
-      <ToolsDiffSection />
+        {/* 카드 1: 정책 설정 검사 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">01</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">정책 설정 검사</span>
+              <code className="pl-check-method">config.get</code>
+              <span className="pl-check-desc">현재 OpenClaw의 보안 설정을 불러옵니다.</span>
+            </div>
+            <span className={`pl-chip ${cfgChipClass}`}>{cfgStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={cfgBusy}
+              onClick={props.onRefreshConfig}
+            >
+              {cfgBusy ? "확인 중…" : "정책 설정 확인"}
+            </button>
+          </div>
+          {cfgErr && <p className="pl-check-error">{cfgErr}</p>}
+          {cfg !== undefined && !cfgErr && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setCfgExpanded((v) => !v)}
+              >
+                {cfgExpanded ? "▲ 상세 접기" : "▼ 상세 보기"}
+              </button>
+              {cfgExpanded && <ConfigView data={cfg} />}
+            </div>
+          )}
+        </div>
+
+        {/* 카드 2: 도구 목록 검사 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">02</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">도구 목록 검사</span>
+              <code className="pl-check-method">tools.catalog</code>
+              <span className="pl-check-desc">현재 등록된 도구 목록을 확인합니다. 플러그인 도구는 삭제할 수 있습니다.</span>
+            </div>
+            <span className={`pl-chip ${catChipClass}`}>{catStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={catBusy}
+              onClick={props.onRefreshCatalog}
+            >
+              {catBusy ? "확인 중…" : "도구 목록 확인"}
+            </button>
+          </div>
+          {catErr && <p className="pl-check-error">{catErr}</p>}
+          {catalog !== undefined && !catErr && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setCatExpanded((v) => !v)}
+              >
+                {catExpanded ? "▲ 상세 접기" : "▼ 상세 보기"}
+              </button>
+              {catExpanded && (
+                <ToolsCatalogView
+                  data={catalog}
+                  highlightToolId={props.highlightToolId}
+                  wsUrl={props.wsUrl}
+                  token={props.token}
+                  onRefreshCatalog={props.onRefreshCatalog}
+                />
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 카드 3: 기준 도구 목록 비교 */}
+        <div className="pl-check-card">
+          <div className="pl-check-card-header">
+            <span className="pl-check-num">03</span>
+            <div className="pl-check-info">
+              <span className="pl-check-title">기준 도구 목록 비교</span>
+              <code className="pl-check-method">tools.effective baseline diff</code>
+              <span className="pl-check-desc">현재 도구 목록과 기준 상태를 비교합니다.</span>
+            </div>
+            <span className={`pl-chip ${diffChipClass}`}>{diffStatus}</span>
+            <button
+              type="button"
+              className="sc-btn-primary"
+              disabled={diffLoading}
+              onClick={() => void loadDiff()}
+            >
+              변경 사항 검사
+            </button>
+          </div>
+          {diffError && <p className="pl-check-error">{diffError}</p>}
+          {diff !== null && (
+            <div className="pl-check-detail">
+              <button
+                type="button"
+                className="pl-detail-toggle"
+                onClick={() => setDiffExpanded((v) => !v)}
+              >
+                {diffExpanded ? "▲ 결과 접기" : "▼ 결과 보기"}
+              </button>
+              {diffExpanded && (
+                <div className="pl-diff-result">
+                  <p className="pl-diff-summary">
+                    baseline {diff.baseline.length}개 / current {diff.current.length}개
+                  </p>
+                  {diff.added.length === 0 && diff.removed.length === 0 ? (
+                    <p className="pl-diff-clean">차이 없음 — 현재 tools.effective가 베이스라인과 일치합니다.</p>
+                  ) : null}
+                  {diff.added.length > 0 && (
+                    <div className="pl-diff-section">
+                      <span className="pl-diff-label pl-diff-added">추가된 도구 ({diff.added.length})</span>
+                      <div className="diff-chip-row">
+                        {diff.added.map((n) => (
+                          <code key={n} className="diff-chip diff-chip-added">{n}</code>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {diff.removed.length > 0 && (
+                    <div className="pl-diff-section">
+                      <span className="pl-diff-label pl-diff-removed">제거된 도구 ({diff.removed.length})</span>
+                      <div className="diff-chip-row">
+                        {diff.removed.map((n) => (
+                          <code key={n} className="diff-chip diff-chip-removed">{n}</code>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div className="pl-diff-section">
+                    <button
+                      type="button"
+                      className="pl-detail-toggle"
+                      onClick={() => setBaselineExpanded((v) => !v)}
+                    >
+                      {baselineExpanded ? "▲ 화이트리스트 접기" : `▼ 화이트리스트 보기 (${diff.baseline.length}개)`}
+                    </button>
+                    {baselineExpanded && (
+                      <>
+                        <p className="pl-diff-hint">
+                          기준 도구 목록 (baseline). 이 목록에 없는 도구가 등장하면 악성 플러그인으로 탐지됩니다.
+                        </p>
+                        <div className="diff-chip-row">
+                          {diff.baseline.map((n) => (
+                            <code key={n} className="diff-chip diff-chip-baseline">{n}</code>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+
+      </div>
+
+      {/* ── 검사 결과 ── */}
+      <h3 className="pl-section-title" style={{ marginTop: 24 }}>검사 결과</h3>
+      {!anyResult ? (
+        <div className="pl-results-empty">
+          <span className="pl-results-empty-icon">◎</span>
+          <p>아직 실행된 검사가 없습니다.</p>
+        </div>
+      ) : (
+        <div className="pl-results-content">
+          {configLoaded && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>정책 설정 로드 완료</span>
+            </div>
+          )}
+          {cfgErr && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">✗</span>
+              <span>정책 설정 오류 — {cfgErr}</span>
+            </div>
+          )}
+          {catalogLoaded && toolCount !== null && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>도구 목록 로드 완료 — {toolCount}개 도구 등록됨</span>
+            </div>
+          )}
+          {catErr && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">✗</span>
+              <span>도구 목록 오류 — {catErr}</span>
+            </div>
+          )}
+          {diff !== null && diff.added.length === 0 && diff.removed.length === 0 && (
+            <div className="pl-result-row pl-result-ok">
+              <span className="pl-result-icon">✓</span>
+              <span>베이스라인 일치 — 위험 변경 없음</span>
+            </div>
+          )}
+          {diff !== null && (diff.added.length > 0 || diff.removed.length > 0) && (
+            <div className="pl-result-row pl-result-danger">
+              <span className="pl-result-icon">!</span>
+              <span>위험 변경 감지 — {diff.added.length}개 추가, {diff.removed.length}개 제거</span>
+            </div>
+          )}
+          {diffError && (
+            <div className="pl-result-row pl-result-warn">
+              <span className="pl-result-icon">!</span>
+              <span>비교 오류 — {diffError}</span>
+            </div>
+          )}
+        </div>
+      )}
+
     </div>
   );
 }

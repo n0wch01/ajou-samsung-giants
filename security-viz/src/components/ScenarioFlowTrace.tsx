@@ -1,7 +1,106 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
+import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
+import { apiPath } from "../lib/publicAsset";
+
+type RealtimeFinding = {
+  id: string;
+  ruleId?: string;
+  category?: string;
+  title: string;
+};
+
+function useRealtimeFindings(active: boolean, clearKey: number | undefined): RealtimeFinding[] {
+  const [findings, setFindings] = useState<RealtimeFinding[]>([]);
+  const seenIds = useRef<Set<string>>(new Set());
+  const seenRuleIds = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    setFindings([]);
+    seenIds.current = new Set();
+    seenRuleIds.current = new Set();
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/findings-realtime"));
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; findings?: unknown[] };
+        if (!json.ok || !Array.isArray(json.findings)) return;
+        // id 중복 + ruleId 중복 제거 (ingest.py + chat_stream.py 양쪽에서 같은 ruleId로 기록하는 경우)
+        const fresh = (json.findings as RealtimeFinding[]).filter((f) => {
+          if (!f.id || seenIds.current.has(f.id)) return false;
+          if (f.ruleId && seenRuleIds.current.has(f.ruleId)) return false;
+          return true;
+        });
+        fresh.forEach((f) => {
+          seenIds.current.add(f.id);
+          if (f.ruleId) seenRuleIds.current.add(f.ruleId);
+        });
+        if (fresh.length > 0) setFindings((prev) => [...prev, ...fresh]);
+      } catch { /* silent */ }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 1500);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  return findings;
+}
+
+type S3Verdict = {
+  verdict: "pass" | "blocked" | "fail" | "pending";
+  s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }>;
+  autoAbort: {
+    phase: string | null;
+    ok: boolean | null;
+    reason: string | null;
+    atMs: number | null;
+  };
+};
 
 const PLUGIN_TOOLS = new Set(["ai_image_gen", "ai_model_check", "ai_image_upload"]);
+
+// ── 이상 행동 감지 ─────────────────────────────────────────
+
+type AnomalyFinding = { label: string; category: "자격증명 노출" | "악성 행동" | "파일 수집" | "데이터 유출" };
+
+const SUSPICIOUS_PATTERNS: Array<{ re: RegExp; label: string; category: AnomalyFinding["category"] }> = [
+  { re: /AKIA[A-Z0-9]{16}/,           label: "AWS 액세스 키 패턴",     category: "자격증명 노출" },
+  { re: /-----BEGIN\s+\w+/,           label: "PEM 키·인증서 패턴",    category: "자격증명 노출" },
+  { re: /FAKE_AWS|FAKE_API|mock_key|mock_secret/i, label: "모의 자격증명 노출", category: "자격증명 노출" },
+  { re: /phase=recon\+exfil|s1_chain|\[S1_MOCK\]/, label: "수집·유출 실행 마커", category: "악성 행동" },
+  { re: /exfil|send.*secret|credential.*send|POST.*token/i, label: "외부 전송 패턴", category: "데이터 유출" },
+  { re: /\.env|API_KEY\s*[=:]|SECRET\s*[=:]/i, label: ".env·API 키 접근 패턴", category: "파일 수집" },
+];
+
+const TOOL_CLAIMED_DESC: Record<string, string> = {
+  ai_image_gen:    "이미지 생성 + 자동 클라우드 저장",
+  ai_model_check:  "AI 모델 상태 확인",
+};
+
+const TOOL_EXPECTED_KEYWORDS: Record<string, string[]> = {
+  ai_image_gen:    ["image", "이미지", "url", "base64", "generated", "width", "height"],
+  ai_model_check:  ["status", "model", "version", "ok", "healthy"],
+};
+
+function detectAnomalies(_toolName: string, output: string): AnomalyFinding[] {
+  if (!output.trim()) return [];
+  const findings: AnomalyFinding[] = [];
+  for (const { re, label, category } of SUSPICIOUS_PATTERNS) {
+    if (re.test(output)) findings.push({ label, category });
+  }
+  return findings;
+}
+
+function hasExpectedContent(toolName: string, output: string): boolean {
+  const keywords = TOOL_EXPECTED_KEYWORDS[toolName];
+  if (!keywords) return true;
+  const lower = output.toLowerCase();
+  return keywords.some((kw) => lower.includes(kw));
+}
 
 // ── 타입 ──────────────────────────────────────────────────
 
@@ -11,9 +110,17 @@ type ParsedTool = {
   id: string;
   name: string;
   args: string;
+  /** session.tool payload에서 읽힌 출력(빈 경우 많음) */
   output: string;
+  /** 임베디드·role=tool 보강 후 최종 표시용 */
+  displayOutput: string;
+  toolCallId: string;
   isMalicious: boolean;
+  isApprovedPlugin: boolean;
   hasResult: boolean;
+  anomalies: AnomalyFinding[];
+  claimedDesc: string;
+  outputMatchesClaim: boolean;
 };
 
 type ScenarioTurn = {
@@ -25,7 +132,8 @@ type ScenarioTurn = {
   responseText: string;
   hasPluginTool: boolean;
   hasTargetTool: boolean;
-  s1Verdict: "success" | "fail" | "pending";
+  hasEnvRead: boolean;
+  s2Verdict: "success" | "fail" | "pending";
   llmStatus: StepStatus;
   toolStatus: StepStatus;
   responseStatus: StepStatus;
@@ -133,10 +241,6 @@ function isUser(role: string) {
   const r = role.toLowerCase();
   return r === "user" || r === "human";
 }
-function isAssistant(role: string) {
-  const r = role.toLowerCase();
-  return r === "assistant" || r === "model" || r === "bot";
-}
 
 function shouldCaptureResponse(role: string): boolean {
   const r = role.toLowerCase();
@@ -183,6 +287,18 @@ function getArgs(p: Record<string, unknown> | undefined): string {
   try { return JSON.stringify(args, null, 2); } catch { return String(args); }
 }
 
+function extractTextFromContentArray(v: unknown): string {
+  if (!Array.isArray(v)) return "";
+  const chunks: string[] = [];
+  for (const item of v) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const o = item as Record<string, unknown>;
+    if (typeof o.text === "string" && o.text.trim()) chunks.push(o.text.trim());
+    else if (typeof o.content === "string" && o.content.trim()) chunks.push(o.content.trim());
+  }
+  return chunks.join("\n").trim();
+}
+
 function getOutput(p: Record<string, unknown> | undefined): string {
   if (!p) return "";
   const keys = [
@@ -206,6 +322,10 @@ function getOutput(p: Record<string, unknown> | undefined): string {
       const v = obj[k];
       if (v == null) continue;
       if (typeof v === "string" && v.trim()) return v.trim().slice(0, 6000);
+      if (Array.isArray(v)) {
+        const extracted = extractTextFromContentArray(v);
+        if (extracted) return extracted.slice(0, 6000);
+      }
       try {
         const s = JSON.stringify(v, null, 2);
         if (s && s !== "{}" && s !== "[]") return s.slice(0, 6000);
@@ -226,7 +346,7 @@ function firstNonEmptyString(...vals: unknown[]): string {
 function readNestedToolName(o: Record<string, unknown>): string {
   const data = eventDataObj(o);
   if (data) {
-    const dt = firstNonEmptyString(data.title, data.name, data.toolName, data.tool);
+    const dt = firstNonEmptyString(data.name, data.toolName, data.tool, data.title);
     if (dt) return dt;
   }
   const inv = o.invocation;
@@ -335,18 +455,93 @@ function extractSessionHint(p: Record<string, unknown> | undefined): string {
 
 let _seq = 0;
 
+function enrichToolDisplayOutputs(
+  tools: ParsedTool[],
+  entries: TimelineEntry[],
+  lastUserIdx: number,
+  getTextFromPayload: typeof getText,
+): void {
+  const byKey = new Map<string, string>();
+  for (let i = lastUserIdx + 1; i < entries.length; i++) {
+    for (const line of extractEmbeddedToolLinesForViz(entries[i])) {
+      if (!line.mergeKey) continue;
+      const prev = byKey.get(line.mergeKey) || "";
+      if (line.outputFull.length > prev.length) byKey.set(line.mergeKey, line.outputFull);
+    }
+  }
+  for (const t of tools) {
+    let best = t.displayOutput;
+    for (const [mk, out] of byKey) {
+      if (!out.trim()) continue;
+      if (t.toolCallId) {
+        if (mk === `${t.name}#${t.toolCallId}` || mk.endsWith(`#${t.toolCallId}`)) {
+          if (out.length > best.length) best = out;
+        }
+      } else if (t.name && mk.startsWith(`${t.name}#`)) {
+        if (out.length > best.length) best = out;
+      }
+    }
+    t.displayOutput = best;
+  }
+  for (let i = lastUserIdx + 1; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.kind !== "session.message" && e.kind !== "chat") continue;
+    const p = payloadOf(e);
+    if (!p) continue;
+    if (getRole(p, e.kind).toLowerCase() !== "tool") continue;
+    const name =
+      (typeof p.name === "string" && p.name) ||
+      (typeof p.toolName === "string" && p.toolName) ||
+      (typeof p.tool === "string" && p.tool) ||
+      "tool";
+    const text = getTextFromPayload(p);
+    for (const t of tools) {
+      if (t.name === name && text.length > t.displayOutput.length) t.displayOutput = text;
+    }
+  }
+  for (const t of tools) {
+    if (t.displayOutput.trim().length > 0) t.hasResult = true;
+  }
+}
+
 // ── 턴 파싱 ───────────────────────────────────────────────
 
-function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
-  // 마지막 사용자 메시지 위치
-  let lastUserIdx = -1;
-  for (let i = entries.length - 1; i >= 0; i--) {
+function findUserIndexAtTime(entries: TimelineEntry[], targetMs: number): number {
+  // targetMs 이하의 user message 중 가장 최근 인덱스를 반환. 없으면 -1.
+  let bestIdx = -1;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
-    if (e.kind === "session.message" || e.kind === "chat") {
-      const p = payloadOf(e);
-      const role = getRole(p, e.kind);
-      const text = getText(p) || e.subtitle || "";
-      if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+    if (e.kind !== "session.message" && e.kind !== "chat") continue;
+    const p = payloadOf(e);
+    const role = getRole(p, e.kind);
+    const text = getText(p) || e.subtitle || "";
+    if (!isUser(role) || !text.trim()) continue;
+    const delta = targetMs - e.at;
+    // target 이전(또는 정확히)이면서 가장 가까운 user turn
+    if (delta >= -60_000 && delta < bestDelta) {
+      bestDelta = delta;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function getLastScenarioTurn(entries: TimelineEntry[], approvalMap: Record<string, boolean>, anchorMs?: number | null): ScenarioTurn | null {
+  // anchorMs가 주어지면 그 시점에 가장 가까운 user turn 선택. 아니면 마지막 user turn.
+  let lastUserIdx = -1;
+  if (anchorMs != null && Number.isFinite(anchorMs)) {
+    lastUserIdx = findUserIndexAtTime(entries, anchorMs);
+  }
+  if (lastUserIdx === -1) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.kind === "session.message" || e.kind === "chat") {
+        const p = payloadOf(e);
+        const role = getRole(p, e.kind);
+        const text = getText(p) || e.subtitle || "";
+        if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+      }
     }
   }
   if (lastUserIdx === -1) return null;
@@ -379,16 +574,29 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
         guessedByText ||
         "tool";
       const args = getArgs(p);
-      const output = getOutput(p) || (typeof e.subtitle === "string" ? e.subtitle : "");
+      const dataObj = eventDataObj(p);
+      const phase = typeof p?.phase === "string" ? p.phase : (typeof dataObj?.phase === "string" ? dataObj.phase : "");
+      const output = phase === "start" ? "" : (getOutput(p) || (typeof e.subtitle === "string" ? e.subtitle : ""));
       const hasResult = output.trim().length > 0;
 
       // 같은 툴 호출 ID면 병합 (args 없던 것에 args 추가, output 갱신)
+      // 게이트웨이 agent 툴 이벤트는 toolCallId가 payload.data 안에 있음(start/update/result 각각 1행씩 옴).
+      const d = eventDataObj(p);
       const callId =
         (typeof p?.toolCallId === "string" && p.toolCallId) ||
+        (typeof d?.toolCallId === "string" && d.toolCallId) ||
         (typeof p?.tool_use_id === "string" && p.tool_use_id) ||
+        (typeof d?.tool_use_id === "string" && d.tool_use_id) ||
         (typeof p?.callId === "string" && p.callId) ||
+        (typeof d?.callId === "string" && d.callId) ||
         (typeof p?.invocationId === "string" && p.invocationId) ||
+        (typeof d?.invocationId === "string" && d.invocationId) ||
         (typeof p?.id === "string" && p.id) ||
+        (typeof d?.id === "string" && d.id) ||
+        (typeof dataObj?.toolCallId === "string" && dataObj.toolCallId) ||
+        (typeof dataObj?.tool_use_id === "string" && dataObj.tool_use_id) ||
+        (typeof dataObj?.callId === "string" && dataObj.callId) ||
+        (typeof dataObj?.invocationId === "string" && dataObj.invocationId) ||
         "";
       const mergeKey = callId || `${name}#${i}`;
 
@@ -396,19 +604,29 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
         const existing = seenMerge.get(mergeKey)!;
         if (isGenericToolName(existing.name) && !isGenericToolName(name)) {
           existing.name = name;
-          existing.isMalicious = PLUGIN_TOOLS.has(name);
+          const hasMap = Object.keys(approvalMap).length > 0;
+          existing.isMalicious = hasMap ? approvalMap[name] === false : PLUGIN_TOOLS.has(name);
+          existing.isApprovedPlugin = hasMap ? approvalMap[name] === true : false;
         }
         if (args.trim() && !existing.args.trim()) existing.args = args;
         if (output.length > existing.output.length) existing.output = output;
+        if (output.length > existing.displayOutput.length) existing.displayOutput = output;
         if (hasResult) existing.hasResult = true;
       } else {
+        const _hasMap = Object.keys(approvalMap).length > 0;
         const tool: ParsedTool = {
           id: `tool-${_seq++}`,
           name,
           args,
           output,
-          isMalicious: PLUGIN_TOOLS.has(name),
+          displayOutput: output,
+          toolCallId: callId,
+          isMalicious: _hasMap ? approvalMap[name] === false : PLUGIN_TOOLS.has(name),
+          isApprovedPlugin: _hasMap ? approvalMap[name] === true : false,
           hasResult,
+          anomalies: [],
+          claimedDesc: TOOL_CLAIMED_DESC[name] ?? "",
+          outputMatchesClaim: true,
         };
         tools.push(tool);
         seenMerge.set(mergeKey, tool);
@@ -425,17 +643,34 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
     }
   }
 
+  enrichToolDisplayOutputs(tools, entries, lastUserIdx, getText);
+
+  // 이상 행동 분석 — displayOutput 확정 후 실행
+  for (const t of tools) {
+    const out = t.displayOutput || t.output;
+    t.anomalies = detectAnomalies(t.name, out);
+    t.outputMatchesClaim = hasExpectedContent(t.name, out);
+    t.claimedDesc = TOOL_CLAIMED_DESC[t.name] ?? t.claimedDesc;
+  }
+
   // 단계 상태 계산
   const hasTools = tools.length > 0;
   const allToolsDone = hasTools && tools.every((t) => t.hasResult);
   const hasResponse = responseText.trim().length > 0;
-  const llmStatus: StepStatus = hasTools || hasResponse ? "done" : "active";
-  const toolStatus: StepStatus = !hasTools ? "pending" : allToolsDone || hasResponse ? "done" : "active";
-  const responseStatus: StepStatus = hasResponse ? "done" : hasTools && allToolsDone ? "active" : "pending";
+  // anchorMs가 있으면 historical 조회 — 미완료여도 "active"가 아니라 "done"으로 표시
+  const isHistorical = anchorMs != null && Number.isFinite(anchorMs);
+  const llmStatus: StepStatus = hasTools || hasResponse ? "done" : (isHistorical ? "done" : "active");
+  const toolStatus: StepStatus = !hasTools
+    ? "pending"
+    : (allToolsDone || hasResponse || isHistorical) ? "done" : "active";
+  const responseStatus: StepStatus = hasResponse
+    ? "done"
+    : (isHistorical ? "done" : (hasTools && allToolsDone ? "active" : "pending"));
   const toolNames = Array.from(new Set(tools.map((t) => t.name).filter((n) => !isGenericToolName(n))));
   const hasTargetTool = toolNames.includes("ai_image_gen");
-  const s1Verdict: "success" | "fail" | "pending" =
-    responseStatus === "done" ? (hasTargetTool ? "success" : "fail") : "pending";
+  const hasEnvRead = tools.some((t) => t.args.toLowerCase().includes(".env") || t.output.toLowerCase().includes(".env"));
+  const s2Verdict: "success" | "fail" | "pending" =
+    responseStatus === "done" ? (hasEnvRead ? "success" : "fail") : "pending";
 
   return {
     promptText,
@@ -446,7 +681,8 @@ function getLastScenarioTurn(entries: TimelineEntry[]): ScenarioTurn | null {
     responseText,
     hasPluginTool: tools.some((t) => t.isMalicious),
     hasTargetTool,
-    s1Verdict,
+    hasEnvRead,
+    s2Verdict,
     llmStatus,
     toolStatus,
     responseStatus,
@@ -465,41 +701,170 @@ function StatusDot({ status }: { status: StepStatus }) {
   return <span className="ft-dot ft-dot-pending" title="대기" />;
 }
 
-function ToolBlock({ tool }: { tool: ParsedTool }) {
-  const [open, setOpen] = useState(false);
-  const expandable = Boolean(tool.args.trim() || tool.output.trim());
-
+function ScenarioToolBodyToggle({
+  label,
+  open,
+  onOpenChange,
+  children,
+}: {
+  label: string;
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const uid = useId();
+  const regionId = `${uid}-region`;
   return (
-    <div className={`ft-tool${tool.isMalicious ? " ft-tool-danger" : ""}`}>
+    <div className="ft-scenario-tool-body">
       <button
         type="button"
-        className="ft-tool-row"
-        disabled={!expandable}
-        onClick={() => setOpen((v) => !v)}
+        className="ft-scenario-body-toggle"
+        id={`${uid}-btn`}
+        aria-expanded={open}
+        aria-controls={regionId}
+        onClick={() => onOpenChange(!open)}
       >
-        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : "🔧"}</span>
-        <span className="ft-tool-name">{tool.name}</span>
-        {tool.isMalicious && <span className="ft-badge-danger">⚠ PLUGIN</span>}
-        {!tool.hasResult && <span className="ft-badge-running">실행 중…</span>}
-        {expandable && <span className="ft-chev">{open ? "▲" : "▼"}</span>}
+        <span className="ft-detail-label ft-detail-label--toggle">{label}</span>
+        <span className="ft-scenario-chev" aria-hidden>
+          {open ? "▲" : "▼"}
+        </span>
       </button>
-
       {open && (
-        <div className="ft-tool-detail">
-          {tool.args.trim() && (
-            <div className="ft-detail-block">
-              <div className="ft-detail-label">입력 인자</div>
-              <pre className="ft-pre">{tool.args}</pre>
-            </div>
-          )}
-          {tool.output.trim() && (
-            <div className="ft-detail-block">
-              <div className="ft-detail-label">출력 / 실제 동작</div>
-              <pre className={`ft-pre${tool.isMalicious ? " ft-pre-danger" : ""}`}>{tool.output}</pre>
-            </div>
-          )}
+        <div
+          id={regionId}
+          className="ft-scenario-body-panel"
+          role="region"
+          aria-labelledby={`${uid}-btn`}
+        >
+          {children}
         </div>
       )}
+    </div>
+  );
+}
+
+function ToolBlock({ tool, isHistorical }: { tool: ParsedTool; isHistorical?: boolean }) {
+  const showOut = tool.displayOutput.trim() || tool.output.trim();
+  const hasArgs = Boolean(tool.args.trim());
+  const [argsOpen, setArgsOpen] = useState(false);
+
+  return (
+    <div className={`ft-scenario-tool-card${tool.isMalicious ? " ft-scenario-tool-card-danger" : tool.isApprovedPlugin ? " ft-scenario-tool-card-approved" : ""}`}>
+      <div className="ft-scenario-tool-head">
+        <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : tool.isApprovedPlugin ? "🟢" : "🔧"}</span>
+        <code className="ft-code ft-scenario-tool-name">{tool.name}</code>
+        {tool.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
+        {!showOut && (
+          isHistorical
+            ? <span className="ft-badge-blocked">차단됨</span>
+            : <span className="ft-badge-running">실행 중…</span>
+        )}
+      </div>
+      {tool.isMalicious && (
+        <div className="ft-detection-reason">
+          <span className="ft-detection-arrow">└─</span>
+          <span className="ft-detection-label">비승인 플러그인 탐지</span>
+          <span className="ft-detection-text">베이스라인에 없는 도구 — {tool.name}</span>
+        </div>
+      )}
+      {hasArgs ? (
+        <ScenarioToolBodyToggle
+          label="입력 인자"
+          open={argsOpen}
+          onOpenChange={setArgsOpen}
+        >
+          <pre className={`ft-pre ft-pre-scenario-block${tool.isMalicious ? " ft-pre-danger" : ""}`}>
+            {tool.args}
+          </pre>
+        </ScenarioToolBodyToggle>
+      ) : null}
+    </div>
+  );
+}
+
+const CATEGORY_ICON: Record<string, string> = {
+  "자격증명 노출": "🔑",
+  "악성 행동":    "💀",
+  "파일 수집":    "📂",
+  "데이터 유출":  "📡",
+  "credential":   "🔑",
+  "malicious":    "💀",
+  "exfil":        "📡",
+};
+
+function AnomalySection({ t }: { t: ParsedTool }) {
+  const hasAnomalies = t.anomalies.length > 0;
+  const mismatch = t.claimedDesc && !t.outputMatchesClaim;
+  if (!hasAnomalies && !mismatch) return null;
+
+  return (
+    <div className="ft-anomaly-section">
+      <div className="ft-anomaly-header">⚠ 이상 행동 감지</div>
+
+      {t.claimedDesc && (
+        <div className="ft-anomaly-row">
+          <span className="ft-anomaly-key">선언된 동작</span>
+          <span className="ft-anomaly-val ft-anomaly-claimed">{t.claimedDesc}</span>
+        </div>
+      )}
+
+      {mismatch && (
+        <div className="ft-anomaly-row">
+          <span className="ft-anomaly-key">실제 출력</span>
+          <span className="ft-anomaly-val ft-anomaly-mismatch">
+            선언된 기능과 무관한 내용 — 이미지 관련 데이터 없음
+          </span>
+        </div>
+      )}
+
+      {hasAnomalies && (
+        <div className="ft-anomaly-findings">
+          <div className="ft-anomaly-findings-label">감지된 이상 징후</div>
+          <ul className="ft-anomaly-list">
+            {t.anomalies.map((a, i) => (
+              <li key={i} className="ft-anomaly-item">
+                <span className="ft-anomaly-icon">{CATEGORY_ICON[a.category]}</span>
+                <span className="ft-anomaly-cat">[{a.category}]</span>
+                <span className="ft-anomaly-label">{a.label}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FinalToolOutputBlock({ t }: { t: ParsedTool }) {
+  const body = t.displayOutput.trim() || t.output.trim();
+  const [outOpen, setOutOpen] = useState(false);
+  return (
+    <div className={`ft-scenario-tool-card${t.isMalicious ? " ft-scenario-tool-card-danger" : t.isApprovedPlugin ? " ft-scenario-tool-card-approved" : ""}`}>
+      <div className="ft-scenario-tool-head">
+        <span className="ft-tool-icon">{t.isMalicious ? "🔴" : t.isApprovedPlugin ? "🟢" : "🔧"}</span>
+        <code className="ft-code ft-scenario-tool-name">{t.name}</code>
+        {t.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
+      </div>
+      {t.isMalicious && (
+        <div className="ft-detection-reason">
+          <span className="ft-detection-arrow">└─</span>
+          <span className="ft-detection-label">비승인 플러그인 탐지</span>
+          <span className="ft-detection-text">베이스라인에 없는 도구 — {t.name}</span>
+        </div>
+      )}
+
+      <ScenarioToolBodyToggle label="원본 출력" open={outOpen} onOpenChange={setOutOpen}>
+        {body ? (
+          <pre className={`ft-pre ft-pre-scenario-block${t.isMalicious ? " ft-pre-danger" : ""}`}>
+            {body}
+          </pre>
+        ) : (
+          <p className="ft-muted">
+            툴 본문이 이 타임라인에 잡히지 않았습니다. <code>session.tool</code>이 본문을 생략한 경우 임베디드{" "}
+            <code>agent</code> 스트림·게이트웨이 verbose를 확인하세요.
+          </p>
+        )}
+      </ScenarioToolBodyToggle>
     </div>
   );
 }
@@ -510,11 +875,12 @@ type StepProps = {
   status: StepStatus;
   badge?: React.ReactNode;
   children: React.ReactNode;
+  className?: string;
 };
 
-function Step({ num, label, status, badge, children }: StepProps) {
+function Step({ num, label, status, badge, children, className }: StepProps) {
   return (
-    <div className={`ft-step ft-step-${status}`}>
+    <div className={["ft-step", `ft-step-${status}`, className].filter(Boolean).join(" ")}>
       <div className="ft-step-header">
         <StatusDot status={status} />
         <span className="ft-step-num">{num}</span>
@@ -538,17 +904,345 @@ function Connector({ label }: { label?: string }) {
   );
 }
 
+// ── 실시간 인터셉트 배너 ─────────────────────────────────────
+
+const CATEGORY_LABEL: Record<string, string> = {
+  credential: "자격증명 노출",
+  malicious:  "악성 행동",
+  exfil:      "데이터 유출",
+};
+
+function RealtimeInterceptBanner({
+  anomalies,
+  rtFindings,
+  toolStatus,
+}: {
+  anomalies: AnomalyFinding[];
+  rtFindings: RealtimeFinding[];
+  toolStatus: StepStatus;
+}) {
+  const hasAnomaly = anomalies.length > 0;
+  const hasRt = rtFindings.length > 0;
+  if (!hasAnomaly && !hasRt) return null;
+  if (toolStatus === "pending") return null;
+
+  return (
+    <div className="ft-intercept-row">
+      <div className="ft-intercept-banner">
+        <div className="ft-intercept-header">
+          <span className="ft-intercept-icon">🛡</span>
+          <span className="ft-intercept-title">Sentinel 실시간 인터셉트</span>
+        </div>
+
+        {hasAnomaly && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">클라이언트 탐지 (출력 패턴 분석)</div>
+            <ul className="ft-intercept-list">
+              {anomalies.map((a, i) => (
+                <li key={i} className="ft-intercept-item">
+                  <span className="ft-intercept-cat-icon">{CATEGORY_ICON[a.category] ?? "⚠"}</span>
+                  <span className="ft-intercept-cat">[{a.category}]</span>
+                  <span className="ft-intercept-label">{a.label}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {hasRt && (
+          <div className="ft-intercept-section">
+            <div className="ft-intercept-section-label">Sentinel 인터셉터 (서버 실시간 탐지)</div>
+            <ul className="ft-intercept-list">
+              {rtFindings.map((f) => (
+                <li key={f.id} className="ft-intercept-item">
+                  <span className="ft-intercept-cat-icon">{CATEGORY_ICON[f.category ?? ""] ?? "⚠"}</span>
+                  <span className="ft-intercept-cat">[{CATEGORY_LABEL[f.category ?? ""] ?? f.category ?? "탐지"}]</span>
+                  <span className="ft-intercept-label">{f.title}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+
 type ScenarioFlowTraceProps = {
   entries: TimelineEntry[];
   sessionKey?: string;
+  scenarioId?: string | null;
+  /** Monitoring 탭에서 finding 시점을 기준으로 turn을 선택할 때 사용 (ms epoch). */
+  anchorTimestamp?: number | null;
+  /** Monitoring 탭에서 강조할 finding id (현재는 시각적 강조 용도만). */
+  highlightFindingId?: string | null;
 };
 
-export function ScenarioFlowTrace({ entries, sessionKey }: ScenarioFlowTraceProps) {
-  const turn = useMemo(() => getLastScenarioTurn(entries), [entries]);
+// ── Exfil 로그 훅 ─────────────────────────────────────────────
 
+type ExfilRecord = {
+  id: string;
+  ts: number;
+  source: string;
+  bytes: number;
+  correlation_id: string;
+  payload: string;
+  blocked: boolean;
+};
+
+type ExfilLogState = {
+  log: ExfilRecord[];
+};
+
+function useExfilLog(active: boolean, clearKey: number | undefined): ExfilLogState {
+  const [state, setState] = useState<ExfilLogState>({ log: [] });
+  const seenIds = useRef<Set<string>>(new Set());
+
+  // 새 시나리오 실행 시 클리어
+  useEffect(() => {
+    setState({ log: [] });
+    seenIds.current = new Set();
+    void fetch(apiPath("/api/sentinel/exfil-log/clear"), { method: "POST" }).catch(() => {});
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const poll = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/exfil-log"));
+        if (!res.ok) return;
+        const json = (await res.json()) as { ok?: boolean; log?: ExfilRecord[] };
+        if (!json.ok) return;
+        const fresh = (json.log ?? []).filter((r) => !seenIds.current.has(r.id));
+        fresh.forEach((r) => seenIds.current.add(r.id));
+        if (fresh.length > 0) {
+          setState((prev) => ({
+            log: [...prev.log, ...fresh],
+          }));
+        }
+      } catch { /* silent */ }
+    };
+    void poll();
+    const id = window.setInterval(() => void poll(), 1500);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  return state;
+}
+
+// ── Exfil 패널 컴포넌트 ────────────────────────────────────────
+
+type FetchGateItem = {
+  id: string;
+  url: string;
+  method: string;
+  payload: string;
+  bytes: number;
+  source: string;
+  ts: number;
+  status: "pending" | "approved" | "denied";
+};
+
+function useFetchGatePending(active: boolean, clearKey: number | undefined) {
+  const [items, setItems] = useState<FetchGateItem[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // 로컬만 초기화 — 서버 clear-pending 은 호출하지 않음(인터셉터가 승인 대기 중일 때 전부 denied 되어 버림).
+  useEffect(() => {
+    setItems([]);
+  }, [clearKey]);
+
+  useEffect(() => {
+    if (!active) return;
+    const tick = async () => {
+      try {
+        const res = await fetch(apiPath("/api/sentinel/fetch-gate/pending"));
+        if (!res.ok) return;
+        const j = (await res.json()) as { ok?: boolean; items?: FetchGateItem[] };
+        if (!j.ok || !Array.isArray(j.items)) return;
+        setItems(j.items);
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 400);
+    return () => window.clearInterval(id);
+  }, [active]);
+
+  const approve = useCallback((id: string) => {
+    setBusyId(id);
+    void fetch(apiPath("/api/sentinel/fetch-gate/approve"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).finally(() => setBusyId(null));
+  }, []);
+
+  const deny = useCallback((id: string) => {
+    setBusyId(id);
+    void fetch(apiPath("/api/sentinel/fetch-gate/deny"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).finally(() => setBusyId(null));
+  }, []);
+
+  return { items, busyId, approve, deny };
+}
+
+function FetchGatePanel(props: {
+  items: FetchGateItem[];
+  busyId: string | null;
+  onApprove: (id: string) => void;
+  onDeny: (id: string) => void;
+}) {
+  if (props.items.length === 0) return null;
+
+  return (
+    <div className="ft-fetch-gate-panel">
+      <div className="ft-fetch-gate-header">
+        <span className="ft-fetch-gate-title">외부 전송 승인 대기</span>
+        <span className="ft-fetch-gate-sub">
+          인터셉터가 켜진 openclaw는 기본적으로 여기서 승인할 때까지 보내지 않습니다. 즉시 전송만 하려면 SENTINEL_FETCH_GATE=0
+        </span>
+      </div>
+      <ul className="ft-fetch-gate-list">
+        {props.items.map((it) => (
+          <li key={it.id} className="ft-fetch-gate-item">
+            <div className="ft-fetch-gate-row">
+              <span className="ft-fetch-gate-method">{it.method}</span>
+              <code className="ft-fetch-gate-url">{it.url}</code>
+            </div>
+            <div className="ft-fetch-gate-meta">
+              {it.bytes}B · {it.source} · {new Date(it.ts).toLocaleTimeString("ko-KR")}
+            </div>
+            {it.payload ? (
+              <pre className="ft-fetch-gate-payload">{it.payload}</pre>
+            ) : null}
+            <div className="ft-fetch-gate-actions">
+              <button
+                type="button"
+                className="ft-fetch-gate-btn ft-fetch-gate-btn-approve"
+                disabled={props.busyId !== null}
+                onClick={() => props.onApprove(it.id)}
+              >
+                승인 후 전송
+              </button>
+              <button
+                type="button"
+                className="ft-fetch-gate-btn ft-fetch-gate-btn-deny"
+                disabled={props.busyId !== null}
+                onClick={() => props.onDeny(it.id)}
+              >
+                거절
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ExfilLogPanel({ log }: ExfilLogState) {
+  if (log.length === 0) return null;
+
+  return (
+    <div className="ft-exfil-panel">
+      <div className="ft-exfil-header">
+        <span className="ft-exfil-title">
+          {log.some((r) => !r.blocked) ? "📡 외부 전송 감지됨" : "🛡 외부 전송 차단됨"}
+        </span>
+      </div>
+
+      {log.map((r) => (
+        <div key={r.id} className={`ft-exfil-record ${r.blocked ? "ft-exfil-record-blocked" : "ft-exfil-record-sent"}`}>
+          <div className="ft-exfil-record-head">
+            <span className="ft-exfil-status">{r.blocked ? "🚫 차단" : "✅ 전송됨"}</span>
+            <span className="ft-exfil-meta">{r.bytes}B · {r.source} · {new Date(r.ts).toLocaleTimeString("ko-KR")}</span>
+          </div>
+          {!r.blocked && r.payload && (
+            <pre className="ft-exfil-payload">{r.payload}</pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+
+function usePluginApprovalMap(): Record<string, boolean> {
+  const [map, setMap] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    let cancelled = false;
+    void fetch(apiPath("/api/sentinel/findings"))
+      .then((r) => r.json())
+      .then((j: { pluginApprovalMap?: Record<string, boolean> }) => {
+        if (!cancelled && j.pluginApprovalMap && typeof j.pluginApprovalMap === "object") {
+          setMap(j.pluginApprovalMap);
+        }
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+  return map;
+}
+
+export function ScenarioFlowTrace({ entries, sessionKey, scenarioId, anchorTimestamp, highlightFindingId }: ScenarioFlowTraceProps) {
+  void highlightFindingId; // 현재는 미사용 (향후 banner 강조에 활용)
+  const pluginApprovalMap = usePluginApprovalMap();
+  const turn = useMemo(
+    () => getLastScenarioTurn(entries, pluginApprovalMap, anchorTimestamp),
+    [entries, pluginApprovalMap, anchorTimestamp],
+  );
+
+  const hasPluginTool = turn?.hasPluginTool ?? false;
+  const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3" || scenarioId === "S2", turn?.at);
+  const exfil = useExfilLog(hasPluginTool, turn?.at);
+  // Vite 개발 서버에서만 게이트 API가 있음. turn 에 묶지 않음 — 타임라인 파싱 전에도 대기 건 표시.
+  const fetchGate = useFetchGatePending(import.meta.env.DEV, turn?.at);
+
+  // 모든 툴의 anomalies 합산
+  const allAnomalies = useMemo(
+    () => turn?.tools.flatMap((t) => t.anomalies) ?? [],
+    [turn],
+  );
+
+  // sentinel이 툴 결과를 차단하면 toolStatus가 영원히 "active"에 머뭄.
+  // rtFindings가 있으면 이미 인터셉트된 것이므로 "실시간" 뱃지를 끈다.
+  const sentinelIntercepted = rtFindings.length > 0 && turn?.toolStatus === "active";
   const isLive =
+    !sentinelIntercepted &&
     turn !== null &&
     (turn.llmStatus === "active" || turn.toolStatus === "active" || turn.responseStatus === "active");
+
+  // S3 verdict 폴링 (2초 간격)
+  const [s3, setS3] = useState<S3Verdict | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    const tick = async () => {
+      try {
+        const r = await fetch(apiPath("/api/sentinel/s3-verdict"), { method: "GET" });
+        if (r.status === 404) return;
+        const j = (await r.json()) as { ok?: boolean } & S3Verdict;
+        if (!cancelled && j.ok) setS3({ verdict: j.verdict, s3HighFindings: j.s3HighFindings, autoAbort: j.autoAbort });
+      } catch {
+        /* 무시 */
+      } finally {
+        if (!cancelled) timer = window.setTimeout(tick, 2000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, []);
 
   return (
     <div className="ft-panel">
@@ -563,120 +1257,182 @@ export function ScenarioFlowTrace({ entries, sessionKey }: ScenarioFlowTraceProp
         {turn && (
           <span className="ft-panel-time">{timeStr(turn.at)}</span>
         )}
-        {turn?.hasPluginTool && (
-          <span className="ft-badge-critical">CRITICAL</span>
+        {scenarioId === "S1" && turn?.hasPluginTool && (
+          <span className="ft-badge-success">BLOCKED</span>
         )}
-        {turn?.s1Verdict === "success" && (
-          <span className="ft-badge-success">S1 성공</span>
+        {scenarioId === "S2" && (turn?.hasEnvRead || rtFindings.length > 0) && (
+          <span className="ft-badge-success">BLOCKED</span>
         )}
-        {turn?.s1Verdict === "fail" && (
-          <span className="ft-badge-fail">S1 실패</span>
+        {scenarioId === "S3" && s3 && (s3.verdict === "blocked" || s3.verdict === "fail") && (
+          <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
+            BLOCKED
+          </span>
         )}
       </div>
 
       <div className="ft-body">
+        {import.meta.env.DEV ? (
+          <FetchGatePanel
+            items={fetchGate.items}
+            busyId={fetchGate.busyId}
+            onApprove={fetchGate.approve}
+            onDeny={fetchGate.deny}
+          />
+        ) : null}
         {!turn ? (
           <p className="ft-empty">시나리오를 실행하면 여기에 흐름이 표시됩니다.</p>
         ) : (
           <>
-            {/* ① 프롬프트 */}
-            <Step num="①" label="사용자 프롬프트" status="done">
-              <blockquote className="ft-prompt">{turn.promptText}</blockquote>
-            </Step>
+            {/* ── 1행: 프롬프트 → LLM → 툴 실행 ── */}
+            <div className="ft-row">
+              {/* ① 프롬프트 */}
+              <Step num="①" label="사용자 프롬프트" status="done">
+                <blockquote className="ft-prompt">{turn.promptText}</blockquote>
+              </Step>
 
-            <Connector
-              label={
-                turn.llmStatus === "active"
-                  ? "LLM 처리 중…"
-                  : turn.toolNames.length > 0
-                  ? `LLM → ${turn.toolNames.join(", ")} 호출 결정`
-                  : undefined
-              }
+              <Connector
+                label={
+                  turn.llmStatus === "active"
+                    ? "LLM 처리 중…"
+                    : turn.toolNames.length > 0
+                    ? `LLM → ${turn.toolNames.join(", ")} 호출 결정`
+                    : undefined
+                }
+              />
+
+              {/* ② LLM 처리 */}
+              <Step num="②" label="LLM 처리" status={turn.llmStatus}>
+                {turn.llmStatus === "active" ? (
+                  <span className="ft-muted">응답 생성 중…</span>
+                ) : (
+                  <div className="ft-llm-info">
+                    <span className="ft-llm-dest">
+                      세션{" "}
+                      <code className="ft-code">
+                        {turn.sessionHint || sessionKey || "agent:main"}
+                      </code>
+                      으로 전달
+                    </span>
+                    {turn.toolNames.length > 0 && (
+                      <span className="ft-llm-decision">
+                        →{" "}
+                        {turn.toolNames.map((name) => (
+                          <span
+                            key={name}
+                            className={`ft-tool-ref${
+                              Object.keys(pluginApprovalMap).length > 0
+                                ? pluginApprovalMap[name] === false
+                                  ? " ft-tool-ref-danger"
+                                  : pluginApprovalMap[name] === true
+                                  ? " ft-tool-ref-approved"
+                                  : ""
+                                : PLUGIN_TOOLS.has(name) ? " ft-tool-ref-danger" : ""
+                            }`}
+                          >
+                            {name}
+                          </span>
+                        ))}{" "}
+                        호출 결정
+                      </span>
+                    )}
+                    {turn.toolNames.length === 0 && (
+                      <span className="ft-muted">직접 응답 (툴 호출 없음)</span>
+                    )}
+                  </div>
+                )}
+              </Step>
+
+              {turn.toolStatus !== "pending" && (
+                <>
+                  <Connector />
+                  {/* ③ 툴 실행 */}
+                  <Step
+                    num="③"
+                    label="툴 실행"
+                    status={turn.toolStatus}
+                    badge={
+                      turn.hasPluginTool ? (
+                        <span className="ft-badge-danger">플러그인 툴 감지</span>
+                      ) : null
+                    }
+                  >
+                    {turn.toolNames.length > 0 && (
+                      <div className="ft-tool-summary">
+                        호출: {turn.toolNames.join(", ")}
+                      </div>
+                    )}
+                    {turn.tools.map((t) => (
+                      <ToolBlock key={t.id} tool={t} isHistorical={anchorTimestamp != null} />
+                    ))}
+                  </Step>
+                </>
+              )}
+            </div>
+
+            {/* ── 인터셉트 배너: ③ 툴 실행 직후 ── */}
+            <RealtimeInterceptBanner
+              anomalies={allAnomalies}
+              rtFindings={rtFindings}
+              toolStatus={turn.toolStatus}
             />
 
-            {/* ② LLM 처리 */}
-            <Step
-              num="②"
-              label="LLM 처리"
-              status={turn.llmStatus}
-            >
-              {turn.llmStatus === "active" ? (
-                <span className="ft-muted">응답 생성 중…</span>
-              ) : (
-                <div className="ft-llm-info">
-                  <span className="ft-llm-dest">
-                    세션{" "}
-                    <code className="ft-code">
-                      {turn.sessionHint || sessionKey || "agent:main"}
-                    </code>
-                    으로 전달
-                  </span>
-                  {turn.toolNames.length > 0 && (
-                    <span className="ft-llm-decision">
-                      →{" "}
-                      {turn.toolNames.map((name) => (
-                        <span
-                          key={name}
-                          className={`ft-tool-ref${PLUGIN_TOOLS.has(name) ? " ft-tool-ref-danger" : ""}`}
-                        >
-                          {name}
-                        </span>
-                      ))}{" "}
-                      호출 결정
-                    </span>
-                  )}
-                  {turn.toolNames.length === 0 && (
-                    <span className="ft-muted">직접 응답 (툴 호출 없음)</span>
-                  )}
-                </div>
-              )}
-            </Step>
+            {/* ── 외부 전송 승인 게이트 ── */}
+            <FetchGatePanel
+              items={fetchGate.items}
+              busyId={fetchGate.busyId}
+              onApprove={fetchGate.approve}
+              onDeny={fetchGate.deny}
+            />
 
-            {turn.toolStatus !== "pending" && (
-              <>
-                <Connector />
+            <ExfilLogPanel log={exfil.log} />
 
-                {/* ③ 툴 실행 */}
+            {/* ── 2행: 최종 툴 출력 → 에이전트 응답 ── */}
+            {((turn.tools.length > 0 && turn.toolStatus !== "pending") || turn.responseStatus !== "pending") ? (
+              <div className="ft-row ft-row-second">
+                {turn.tools.length > 0 && turn.toolStatus !== "pending" && (
+                  <>
+                    {/* ④ 최종 툴 출력 */}
+                    <Step
+                      num="④"
+                      label="최종 툴 출력"
+                      status={turn.toolStatus}
+                      badge={
+                        turn.hasPluginTool ? (
+                          <span className="ft-badge-danger">플러그인 툴 감지</span>
+                        ) : null
+                      }
+                    >
+                      {turn.tools.map((t) => (
+                        <FinalToolOutputBlock key={t.id} t={t} />
+                      ))}
+                    </Step>
+                    <Connector />
+                  </>
+                )}
+
+                {/* ⑤ 에이전트 최종 응답 */}
                 <Step
-                  num="③"
-                  label="툴 실행"
-                  status={turn.toolStatus}
-                  badge={
-                    turn.hasPluginTool ? (
-                      <span className="ft-badge-danger">플러그인 툴 감지</span>
-                    ) : null
-                  }
+                  className="ft-step-agent-final"
+                  num={turn.tools.length > 0 && turn.toolStatus !== "pending" ? "⑤" : "④"}
+                  label="에이전트 최종 응답"
+                  status={turn.responseStatus}
                 >
-                  {turn.toolNames.length > 0 ? (
-                    <div className="ft-tool-summary">
-                      호출: {turn.toolNames.join(", ")}
+                  {turn.responseStatus === "pending" && (
+                    <span className="ft-muted">대기 중…</span>
+                  )}
+                  {turn.responseStatus === "active" && (
+                    <p className="ft-muted">응답 생성 중…</p>
+                  )}
+                  {turn.responseText.trim() ? (
+                    <div className="ft-agent-reply-panel">
+                      <p className="ft-response ft-response-agent-final">{turn.responseText}</p>
                     </div>
                   ) : null}
-                  {turn.tools.map((t) => (
-                    <ToolBlock key={t.id} tool={t} />
-                  ))}
                 </Step>
-              </>
-            )}
+              </div>
+            ) : null}
 
-            <Connector />
 
-            {/* ④ 최종 응답 */}
-            <Step
-              num="④"
-              label="에이전트 최종 응답"
-              status={turn.responseStatus}
-            >
-              {turn.responseStatus === "pending" && (
-                <span className="ft-muted">대기 중…</span>
-              )}
-              {turn.responseStatus === "active" && (
-                <span className="ft-muted">응답 생성 중…</span>
-              )}
-              {turn.responseStatus === "done" && turn.responseText && (
-                <p className="ft-response">{turn.responseText}</p>
-              )}
-            </Step>
           </>
         )}
       </div>

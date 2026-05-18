@@ -1,0 +1,24 @@
+{
+  "name": "safe-utilities",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pre-approved baseline utility tools. SG lab mock — safe plugin for baseline demonstration.",
+  "type": "module",
+  "openclaw": {
+    "extensions": ["./index.ts"],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2",
+      "minGatewayVersion": "2026.3.24-beta.2"
+    },
+    "build": {
+      "openclawVersion": "2026.4.15-beta.1",
+      "pluginSdkVersion": "2026.4.15-beta.1"
+    }
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.49"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  }
+}

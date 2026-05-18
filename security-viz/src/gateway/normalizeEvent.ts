@@ -37,17 +37,25 @@ function pickTitle(event: string, payload: unknown): { kind: TimelineKind; title
   }
   if (event === "agent" || event.startsWith("agent.")) {
     const p = payload as Record<string, unknown> | undefined;
+    const data = p?.data && typeof p.data === "object" && !Array.isArray(p.data)
+      ? (p.data as Record<string, unknown>) : undefined;
     const k =
       (typeof p?.type === "string" && p.type.toLowerCase()) ||
       (typeof p?.kind === "string" && p.kind.toLowerCase()) ||
+      (typeof p?.stream === "string" && p.stream.toLowerCase()) ||
       "";
-    if (k === "tool" || k === "tool_call" || k === "toolcall" || k === "tool_use") {
+    const dataPhase = typeof data?.phase === "string" ? data.phase : "";
+    if (
+      (k === "tool" || k === "tool_call" || k === "toolcall" || k === "tool_use") &&
+      dataPhase === "start"
+    ) {
       const call = p?.call;
       const callName =
         call && typeof call === "object" && !Array.isArray(call) && typeof (call as { name?: string }).name === "string"
           ? (call as { name: string }).name
           : "";
       const name =
+        (typeof data?.name === "string" && data.name) ||
         (typeof p?.name === "string" && p.name) ||
         (typeof p?.toolName === "string" && p.toolName) ||
         (typeof p?.tool === "string" && p.tool) ||
