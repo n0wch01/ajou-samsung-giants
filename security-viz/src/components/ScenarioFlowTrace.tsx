@@ -853,8 +853,6 @@ function FinalToolOutputBlock({ t }: { t: ParsedTool }) {
         </div>
       )}
 
-      <AnomalySection t={t} />
-
       <ScenarioToolBodyToggle label="원본 출력" open={outOpen} onOpenChange={setOutOpen}>
         {body ? (
           <pre className={`ft-pre ft-pre-scenario-block${t.isMalicious ? " ft-pre-danger" : ""}`}>
@@ -1214,7 +1212,11 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId, anchorTimes
     [turn],
   );
 
+  // sentinel이 툴 결과를 차단하면 toolStatus가 영원히 "active"에 머뭄.
+  // rtFindings가 있으면 이미 인터셉트된 것이므로 "실시간" 뱃지를 끈다.
+  const sentinelIntercepted = rtFindings.length > 0 && turn?.toolStatus === "active";
   const isLive =
+    !sentinelIntercepted &&
     turn !== null &&
     (turn.llmStatus === "active" || turn.toolStatus === "active" || turn.responseStatus === "active");
 
@@ -1256,14 +1258,14 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId, anchorTimes
           <span className="ft-panel-time">{timeStr(turn.at)}</span>
         )}
         {scenarioId === "S1" && turn?.hasPluginTool && (
-          <span className="ft-badge-success">S1 BLOCKED</span>
+          <span className="ft-badge-success">BLOCKED</span>
         )}
-        {scenarioId === "S2" && turn?.hasEnvRead && (
-          <span className="ft-badge-success">S2 BLOCKED</span>
+        {scenarioId === "S2" && (turn?.hasEnvRead || rtFindings.length > 0) && (
+          <span className="ft-badge-success">BLOCKED</span>
         )}
         {scenarioId === "S3" && s3 && (s3.verdict === "blocked" || s3.verdict === "fail") && (
           <span className="ft-badge-success" title={s3.s3HighFindings.map((f) => f.ruleId).join(", ")}>
-            S3 BLOCKED
+            BLOCKED
           </span>
         )}
       </div>
