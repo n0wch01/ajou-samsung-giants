@@ -484,9 +484,6 @@ async def _run_ingest(
     if auto_abort:
         rules_path = rules_dir or _default_rules_dir_path()
         rules = _load_yaml_rules(rules_path)
-        scenario_prefix = os.environ.get("SENTINEL_SCENARIO_ID", "").strip().lower()
-        if scenario_prefix:
-            rules = [r for r in rules if str(r.get("id", "")).startswith(f"{scenario_prefix}-")]
         detector = RealTimeCombinedDetector(rules)
         meta_line(
             f"auto-abort enabled (min_sev={auto_abort_min_sev}, rules_dir={rules_path}, "

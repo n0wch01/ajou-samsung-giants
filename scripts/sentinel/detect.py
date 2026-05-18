@@ -298,6 +298,9 @@ def _eval_rule(
         # 슬라이딩 윈도우 내 동일 도구 호출 횟수가 임계를 넘으면 finding.
         window_s = float(match.get("window_seconds") or 30)
         max_calls = int(match.get("max_calls") or 10)
+        # max_calls == 0 → 무제한 (탐지 비활성)
+        if max_calls <= 0:
+            return out
         target_tools = match.get("tools") or None
         by_tool: dict[str, list[float]] = defaultdict(list)
         for row in trace:
@@ -475,6 +478,9 @@ class RealTimeRateDetector:
                 continue
             window_s = float(m.get("window_seconds") or 30)
             max_calls = int(m.get("max_calls") or 10)
+            # max_calls == 0 → 무제한 (rate-limit 비활성)
+            if max_calls <= 0:
+                continue
             key = (str(rule.get("id") or rule.get("_source") or ""), tool)
             calls = self._call_times[key]
             calls.append(now)

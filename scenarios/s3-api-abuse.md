@@ -100,7 +100,7 @@ sequenceDiagram
 
 ### LLM·운영 팁
 
-- **Sentinel**: `s3-rate-limit-tool-calls`(high), `s3-identical-args-loop`(critical), `s3-exhaustion-keyword-prompt`(medium) 규칙이 호출 빈도·인자 반복·프롬프트 키워드를 잡는다([scripts/sentinel/rules/s3_api_abuse.yaml](../scripts/sentinel/rules/s3_api_abuse.yaml)).
+- **Sentinel**: `rate-limit-tool-calls`(high), `identical-args-loop`(critical), `exhaustion-keyword-prompt`(medium) 규칙이 호출 빈도·인자 반복·프롬프트 키워드를 잡는다([scripts/sentinel/rules/api_abuse.yaml](../scripts/sentinel/rules/api_abuse.yaml)).
 - 실시간 abort 경로: `RealTimeRateDetector`(detect.py)가 ingest 콜백에서 호출되면 임계 도달 즉시 finding을 반환해 respond가 `sessions.abort`를 호출한다 — 배치 검출보다 빠른 차단을 원할 때 사용.
 
 ## 재현 절차
@@ -125,9 +125,9 @@ sequenceDiagram
 
 | 단계 | 조건 | Sentinel finding |
 |------|------|-----------------|
-| **L1 (고빈도)** | 30초 내 동일 도구 호출 수 ≥ 10 | `s3-rate-limit-tool-calls` — **HIGH** |
-| **L2 (루프)** | 동일 도구·동일 인자 연속 호출 ≥ 5 | `s3-identical-args-loop` — **CRITICAL** |
-| **L3 (키워드)** | 프롬프트/메시지에 종료 조건 부재 키워드 등장 | `s3-exhaustion-keyword-prompt` — **MEDIUM** |
+| **L1 (고빈도)** | 30초 내 동일 도구 호출 수 ≥ 10 | `rate-limit-tool-calls` — **HIGH** |
+| **L2 (루프)** | 동일 도구·동일 인자 연속 호출 ≥ 5 | `identical-args-loop` — **CRITICAL** |
+| **L3 (키워드)** | 프롬프트/메시지에 종료 조건 부재 키워드 등장 | `exhaustion-keyword-prompt` — **MEDIUM** |
 
 **L3만 달성**: 위험 프롬프트는 들어왔지만 실제 루프가 발생하지 않음 (탐지 성공·중단 불필요)
 **L1 달성**: 호출 빈도 이상 — Guardrail에서 경고/차단이 동작했는지 응답 이벤트로 교차 확인
@@ -136,5 +136,5 @@ sequenceDiagram
 ## 참고
 
 - 게이트웨이 이벤트·프로토콜: `openclaw/docs/gateway/protocol.md` (SG 내 `openclaw/` 벤더 트리 기준).
-- 규칙 정의: [scripts/sentinel/rules/s3_api_abuse.yaml](../scripts/sentinel/rules/s3_api_abuse.yaml).
+- 규칙 정의: [scripts/sentinel/rules/api_abuse.yaml](../scripts/sentinel/rules/api_abuse.yaml).
 - 검출 로직(`rate_limit` / `loop_detect` 매처, `RealTimeRateDetector`): [scripts/sentinel/detect.py](../scripts/sentinel/detect.py).

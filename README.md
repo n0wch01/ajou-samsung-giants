@@ -99,7 +99,29 @@ openclaw gateway token
 
 출력된 토큰을 복사해 둡니다.
 
-### 5. Vite 개발 서버 시작
+### 5. 디바이스 페어링 승인 (최초 1회 또는 스코프 변경 시)
+
+시나리오 실행 시 `chat.send`가 필요로 하는 `operator.write` 스코프가 디바이스 페어링에 없으면
+연결 시점에 게이트웨이가 거부합니다. 다음 명령으로 보류 중인 페어링 요청을 확인하고 승인하세요.
+
+```bash
+# 보류 중인 페어링/스코프 업그레이드 요청 확인
+openclaw devices list
+
+# 가장 최근 요청 자동 승인 (간편)
+openclaw devices approve --latest
+
+# 또는 특정 요청 ID 지정
+openclaw devices approve <requestId>
+```
+
+> 다음과 같은 에러가 나오면 위 명령을 실행해야 합니다.
+> ```
+> connect failed: pairing required scope-upgrade: device is paired with fewer scopes
+> than OPENCLAW_GATEWAY_SCOPES. (requestId=...)
+> ```
+
+### 6. Vite 개발 서버 시작
 
 ```bash
 cd security-viz
@@ -112,7 +134,7 @@ npm run dev
 > 이미 다른 Vite 프로세스가 켜져 있으면 포트가 5174로 올라갑니다.  
 > 중복 방지를 위해 재시작 전 기존 터미널에서 `Ctrl+C`로 종료하세요.
 
-### 6. 브라우저에서 연결 설정
+### 7. 브라우저에서 연결 설정
 
 왼쪽 **CONNECTION PANEL** 에 아래 값을 입력하고 **Connect** 클릭:
 
@@ -124,7 +146,7 @@ npm run dev
 
 GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 
-### 7. 시나리오 실행
+### 8. 시나리오 실행
 
 **Test Scenario** 탭에서 S1·S2·S3 카드의 **시나리오 실행** 버튼을 누릅니다.
 
@@ -154,7 +176,8 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 |----------|------|
 | `scripts/openclaw_ws.py` | 게이트웨이 WebSocket 클라이언트 (`connect`, RPC, 이벤트) |
 | `scripts/sentinel/ingest.py` | 구독·정규화·append-only `data/trace.jsonl`, `tools.effective` / `tools.catalog` 스냅샷 |
-| `scripts/sentinel/detect.py` | `rules/*.yaml`, trace, 베이스라인 diff → findings JSON. S2 룰 일부는 오픈소스 [vigil-llm](https://github.com/deadbits/vigil-llm)(Apache-2.0)에서 포팅 |
+| `scripts/sentinel/detect.py` | `RealTimeRateDetector` 클래스 정의(`ingest.py`가 사용). 악성 MD 시그니처는 오픈소스 [vigil-llm](https://github.com/deadbits/vigil-llm)(Apache-2.0)에서 포팅 |
+| `scripts/runner/chat_stream.py` | 화이트리스트 기반 도구 차단 + `md_signatures.yaml` 기반 MD 사전 검사. 차단 시 `findings-realtime.jsonl`에 기록 |
 | `scripts/sentinel/respond.py` | 알림·`findings-latest.json`, 조건부 `sessions.abort` |
 | `scripts/runner/send_scenario.py` | `OPENCLAW_GATEWAY_*` 로 접속해 `chat.send` 등 시나리오 주입 |
 | `scripts/runner/toggle_guardrail.py`, `check_plugin.py` | 러너 보조 스크립트 ([runner/README.md](scripts/runner/README.md)) |

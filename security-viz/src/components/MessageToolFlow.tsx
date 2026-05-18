@@ -31,9 +31,9 @@ type MessageToolFlowProps = {
 
 function blockedCategory(ruleId: string): string {
   const id = ruleId.toLowerCase();
-  if (id.includes("s1") || id.includes("plugin") || id.includes("supply")) return "비승인 플러그인 탐지";
-  if (id.includes("s2") || id.includes("injection") || id.includes("readme") || id.includes("md") || id.includes("prompt")) return "악성 MD 탐지";
-  if (id.includes("s3") || id.includes("rate") || id.includes("abuse") || id.includes("loop")) return "API Abuse 탐지";
+  if (id === "whitelist-violation" || id.includes("plugin") || id.includes("supply")) return "악성 플러그인 탐지";
+  if (id === "md-signature-block" || id.includes("injection") || id.includes("readme") || id.includes("md-") || id.includes("vigil") || id.includes("prompt")) return "악성 MD 탐지";
+  if (id.includes("rate") || id.includes("abuse") || id.includes("loop") || id.includes("exhaustion")) return "API Abuse 탐지";
   return "보안 위협 탐지";
 }
 

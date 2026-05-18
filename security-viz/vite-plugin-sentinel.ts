@@ -196,54 +196,9 @@ function pruneFetchGateResolved(): void {
   }
 }
 
-// Auto-detect: trace.jsonl 변경 감지 → detect.py 자동 실행 → 결과 캐시
-let cachedReport: unknown = null;
-let cachedReportAt: number | null = null;
-let autoDetectBusy = false;
-let autoDetectTimer: ReturnType<typeof setTimeout> | null = null;
-let traceWatcher: fs.FSWatcher | null = null;
-
-async function runAutoDetect(): Promise<void> {
-  if (autoDetectBusy) return;
-  const detectPy = defaultDetectScript();
-  if (!fs.existsSync(detectPy) || !fs.existsSync(defaultTracePath())) return;
-  autoDetectBusy = true;
-  try {
-    const py = pickPython();
-    const { stdout } = await execFileAsync(
-      py,
-      [detectPy, "--trace", defaultTracePath(), "--rules-dir", defaultRulesDir(), "--baseline", defaultBaselinePath()],
-      { cwd: REPO_ROOT, env: { ...process.env, PYTHONPATH: path.join(REPO_ROOT, "scripts"), PYTHONUTF8: "1" }, maxBuffer: 24 * 1024 * 1024, timeout: 60_000 },
-    );
-    const text = stdout.trim();
-    if (text) cachedReport = JSON.parse(text);
-    cachedReportAt = Date.now();
-  } catch {
-    /* silent — UI falls back to last cached */
-  } finally {
-    autoDetectBusy = false;
-  }
-}
-
-function scheduleAutoDetect(): void {
-  if (autoDetectTimer) return;
-  autoDetectTimer = setTimeout(() => {
-    autoDetectTimer = null;
-    void runAutoDetect();
-  }, 600);
-}
-
-function setupTraceWatcher(): void {
-  if (traceWatcher) return;
-  const dir = path.dirname(defaultTracePath());
-  try {
-    if (!fs.existsSync(dir)) return;
-    traceWatcher = fs.watch(dir, (_event, filename) => {
-      if (filename === "trace.jsonl") scheduleAutoDetect();
-    });
-    traceWatcher.on("error", () => { traceWatcher = null; });
-  } catch { /* ignore */ }
-}
+// batch detect 비활성화 — 탐지는 chat_stream.py + ingest.py 의 RealTimeRateDetector가 담당.
+// 이전에는 trace.jsonl 변경을 감지해 detect.py 를 자동 실행했으나, 중복/잡음 finding이
+// 발생해 제거됨. findings-realtime.jsonl만 단일 진실 공급원으로 사용.
 
 /** run-viz.sh 등 외부에서 실행된 ingest.py PID를 찾는다 (macOS/Linux) */
 function findExternalIngestPid(): number | null {
@@ -433,8 +388,7 @@ export function sentinelControlPlugin(): Plugin {
     configureServer(server) {
       server.httpServer?.once("close", () => killChild());
 
-      // trace.jsonl 감시 시작 (서버 시작 시에는 detect 자동 실행 안 함 — 오래된 데이터로 인한 허위 경고 방지)
-      setupTraceWatcher();
+      // batch detect 자동 실행은 비활성화. 탐지는 chat_stream.py + RealTimeRateDetector가 담당.
 
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
@@ -676,6 +630,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
             OPENCLAW_SCENARIO_MESSAGE: message,
             OPENCLAW_SCENARIO_ID: scenarioId,
           };
@@ -737,8 +692,6 @@ export function sentinelControlPlugin(): Plugin {
             const rtPath = path.join(path.dirname(tp), "findings-realtime.jsonl");
             if (fs.existsSync(tp)) fs.writeFileSync(tp, "", "utf-8");
             if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
-            cachedReport = null;
-            cachedReportAt = null;
           } catch { /* 무시 */ }
 
           const sendPy = sendScenarioScript();
@@ -923,8 +876,7 @@ export function sentinelControlPlugin(): Plugin {
         }
 
         if (url === "/api/sentinel/findings" && req.method === "GET") {
-
-          // findings-realtime.jsonl (ingest.py 실시간 탐지) 읽기
+          // 실시간 차단 finding만 반환 (chat_stream.py + ingest.py 의 RealTime detector가 기록)
           const rtPath = path.join(path.dirname(defaultTracePath()), "findings-realtime.jsonl");
           const rtFindings: unknown[] = [];
           if (fs.existsSync(rtPath)) {
@@ -934,27 +886,15 @@ export function sentinelControlPlugin(): Plugin {
               try { rtFindings.push(JSON.parse(t)); } catch { /* skip */ }
             }
           }
-
-          // cachedReport.findings + rtFindings 병합 (id 기준 중복 제거, rt 우선)
-          const reportFindings: unknown[] = Array.isArray(
-            (cachedReport as Record<string, unknown> | null)?.["findings"]
-          ) ? ((cachedReport as Record<string, unknown>)["findings"] as unknown[]) : [];
+          // 중복 id 제거 (마지막 항목 우선)
           const merged = new Map<string, unknown>();
-          for (const f of reportFindings) {
-            const id = (f as Record<string, unknown>)?.["id"];
-            if (typeof id === "string") merged.set(id, f);
-          }
           for (const f of rtFindings) {
             const id = (f as Record<string, unknown>)?.["id"];
             if (typeof id === "string") merged.set(id, { ...(f as object), _rt: true });
           }
-
           sendJson(res, 200, {
             ok: true,
             findings: [...merged.values()],
-            report: cachedReport ?? { findings: [] },
-            checkedAt: cachedReportAt,
-            busy: autoDetectBusy,
           });
           return;
         }
@@ -1130,12 +1070,12 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
-        // ── S3 Rate Limit Policy: YAML 실시간 읽기/쓰기 ─────────────────────────
+        // ── API Abuse Rate Limit Policy: YAML 실시간 읽기/쓰기 ──────────────────
         if (url === "/api/sentinel/rate-limit-policy" && (req.method === "GET" || req.method === "POST")) {
-          const rulesPath = path.join(defaultRulesDir(), "s3_api_abuse.yaml");
+          const rulesPath = path.join(defaultRulesDir(), "api_abuse.yaml");
 
           function parseRlPolicy(yaml: string) {
-            const m = yaml.match(/id:\s*s3-rate-limit-tool-calls[\s\S]*?(?=\n  - id:|$)/);
+            const m = yaml.match(/id:\s*rate-limit-tool-calls[\s\S]*?(?=\n  - id:|$)/);
             const block = m ? m[0] : "";
             return {
               maxCalls: parseInt(block.match(/max_calls:\s*(\d+)/)?.[1] ?? "3", 10),
@@ -1154,17 +1094,18 @@ export function sentinelControlPlugin(): Plugin {
             return;
           }
 
-          // POST: update YAML in-place
+          // POST: update YAML in-place. maxCalls=0 → 무제한 (rate-limit 비활성)
           try {
             const body = await readJsonBody(req);
-            const maxCalls = Math.max(1, Math.min(1000, Number(body.maxCalls ?? 3)));
+            const maxCalls = Math.max(0, Math.min(1000, Number(body.maxCalls ?? 3)));
             const windowSec = Math.max(1, Math.min(3600, Number(body.windowSec ?? 60)));
-            const warningThreshold = Math.max(1, Math.min(maxCalls - 1, Number(body.warningThreshold ?? maxCalls - 1)));
+            const warningThreshold = maxCalls === 0
+              ? 0
+              : Math.max(1, Math.min(maxCalls - 1, Number(body.warningThreshold ?? maxCalls - 1)));
 
             let yaml = fs.readFileSync(rulesPath, "utf8");
-            // 해당 rule 블록만 정확히 업데이트
-            const startIdx = yaml.indexOf("  - id: s3-rate-limit-tool-calls");
-            if (startIdx === -1) throw new Error("s3-rate-limit-tool-calls rule not found");
+            const startIdx = yaml.indexOf("  - id: rate-limit-tool-calls");
+            if (startIdx === -1) throw new Error("rate-limit-tool-calls rule not found");
             const nextRuleIdx = yaml.indexOf("\n  - id:", startIdx + 1);
             const endIdx = nextRuleIdx === -1 ? yaml.length : nextRuleIdx + 1;
             let block = yaml.slice(startIdx, endIdx);
@@ -1213,14 +1154,11 @@ export function sentinelControlPlugin(): Plugin {
         if (url === "/api/sentinel/reset-findings" && req.method === "POST") {
           // ingest.py 종료 — 이후 trace.jsonl에 새 이벤트가 쓰이지 않도록
           killChild();
-          cachedReport = null;
-          cachedReportAt = null;
           const dataDir = path.dirname(defaultTracePath());
           const rtPath = path.join(dataDir, "findings-realtime.jsonl");
           const tracePath = defaultTracePath();
           try {
             if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
-            // trace.jsonl 초기화 — 파일 워처가 detect.py를 재실행해도 결과가 비어있도록
             if (fs.existsSync(tracePath)) fs.writeFileSync(tracePath, "", "utf-8");
           } catch { /* 무시 */ }
           sendJson(res, 200, { ok: true });
@@ -1274,7 +1212,7 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
-        // S3 verdict: trace.jsonl 의 auto_abort meta + cachedReport 의 s3-* finding을 묶어
+        // S3 verdict: trace.jsonl 의 auto_abort meta + findings-realtime 의 API Abuse finding을 묶어
         // PASS / BLOCKED / FAIL 중 하나로 판정. 시나리오 흐름 패널의 verdict 뱃지 데이터.
         if (url === "/api/sentinel/s3-verdict" && req.method === "GET") {
           const tp = defaultTracePath();
@@ -1307,27 +1245,27 @@ export function sentinelControlPlugin(): Plugin {
             /* ignore */
           }
 
-          // S3 finding (severity high+) 가 cachedReport 에 있는지
+          // S3 finding (severity high+) 가 findings-realtime.jsonl에 있는지
           const s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }> = [];
-          const reportObj =
-            cachedReport && typeof cachedReport === "object"
-              ? (cachedReport as Record<string, unknown>)
-              : {};
-          const rawFindings = reportObj["findings"];
-          const findings = Array.isArray(rawFindings)
-            ? (rawFindings as Array<Record<string, unknown>>)
-            : [];
-          for (const f of findings) {
-            const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
-            const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
-            if (!ruleId.startsWith("s3-")) continue;
-            const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
-            if (rank >= 3) {
-              s3HighFindings.push({
-                ruleId,
-                severity,
-                title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
-              });
+          const rtPath = path.join(path.dirname(tp), "findings-realtime.jsonl");
+          if (fs.existsSync(rtPath)) {
+            for (const line of fs.readFileSync(rtPath, "utf-8").split("\n")) {
+              const t = line.trim();
+              if (!t) continue;
+              try {
+                const f = JSON.parse(t) as Record<string, unknown>;
+                const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
+                const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
+                if (!ruleId.includes("rate") && !ruleId.includes("loop") && !ruleId.includes("abuse") && !ruleId.includes("exhaustion")) continue;
+                const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
+                if (rank >= 3) {
+                  s3HighFindings.push({
+                    ruleId,
+                    severity,
+                    title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
+                  });
+                }
+              } catch { /* skip malformed */ }
             }
           }
 

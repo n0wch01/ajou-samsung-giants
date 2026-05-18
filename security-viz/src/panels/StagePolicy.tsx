@@ -367,13 +367,13 @@ function RateLimitSection({ highlightSection }: { highlightSection?: string | nu
           <label className="policy-rl-label">최대 호출 횟수</label>
           <input
             type="number"
-            min={1}
+            min={0}
             max={1000}
             className="policy-rl-input"
             value={policy.maxCalls}
             onChange={(e) => setPolicy((p) => ({ ...p, maxCalls: Number(e.target.value) }))}
           />
-          <span className="policy-rl-unit">회</span>
+          <span className="policy-rl-unit">회 <span className="policy-rl-hint-inline">(0 = 무제한)</span></span>
         </div>
         <div className="policy-rl-row">
           <label className="policy-rl-label">시간 범위</label>
@@ -395,7 +395,9 @@ function RateLimitSection({ highlightSection }: { highlightSection?: string | nu
           {saveError && <span className="policy-rl-error">{saveError}</span>}
         </div>
         <p className="policy-rl-hint">
-          현재 설정: {policy.windowSec}초 내 동일 도구 {policy.maxCalls}회 초과 시 탐지
+          {policy.maxCalls === 0
+            ? "현재 설정: 무제한 — Rate Limit 탐지가 비활성화됩니다."
+            : `현재 설정: ${policy.windowSec}초 내 동일 도구 ${policy.maxCalls}회 초과 시 탐지`}
         </p>
       </div>
     </div>
@@ -434,6 +436,7 @@ export function StagePolicy(props: StagePolicyProps) {
   const [cfgExpanded, setCfgExpanded] = useState(false);
   const [catExpanded, setCatExpanded] = useState(false);
   const [diffExpanded, setDiffExpanded] = useState(false);
+  const [baselineExpanded, setBaselineExpanded] = useState(false);
 
   useEffect(() => {
     if (props.highlightSection === "catalog") {
@@ -650,6 +653,27 @@ export function StagePolicy(props: StagePolicyProps) {
                       </div>
                     </div>
                   )}
+                  <div className="pl-diff-section">
+                    <button
+                      type="button"
+                      className="pl-detail-toggle"
+                      onClick={() => setBaselineExpanded((v) => !v)}
+                    >
+                      {baselineExpanded ? "▲ 화이트리스트 접기" : `▼ 화이트리스트 보기 (${diff.baseline.length}개)`}
+                    </button>
+                    {baselineExpanded && (
+                      <>
+                        <p className="pl-diff-hint">
+                          기준 도구 목록 (baseline). 이 목록에 없는 도구가 등장하면 악성 플러그인으로 탐지됩니다.
+                        </p>
+                        <div className="diff-chip-row">
+                          {diff.baseline.map((n) => (
+                            <code key={n} className="diff-chip diff-chip-baseline">{n}</code>
+                          ))}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               )}
             </div>

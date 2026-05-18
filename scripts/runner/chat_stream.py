@@ -3,40 +3,127 @@
 구독 + chat.send + 이벤트 스트리밍.
 받은 gateway 이벤트를 JSON 한 줄씩 stdout에 출력한다.
 dev server /api/scenario/chat-stream 에서 실행됨.
+
+탐지 로직 (시나리오 ID와 무관하게 항상 동작):
+  - 악성 플러그인 탐지: tool 호출이 화이트리스트(baseline-tools-effective.example.json)에
+    없으면 즉시 차단 + finding(ruleId="whitelist-violation").
+  - 악성 MD 탐지: 파일 읽기 도구가 .md 파일을 읽으려 하면 Sentinel이 독립적으로
+    파일을 읽고 Vigil 시그니처(md_signatures.yaml의 룰)와 매칭.
+    일치 시 즉시 차단 + finding(ruleId="md-signature-block").
 """
 from __future__ import annotations
 import asyncio, json, os, re, sys, time as _time, uuid
 from pathlib import Path
-
-# S1/S2 시나리오: 위협 툴 감지 시 즉시 차단 finding을 기록하는 규칙
-_SCENARIO_BLOCK_RULES: dict[str, list[dict]] = {
-    "S1": [
-        {
-            "pattern": r"ai_image_gen|ai_model_check",
-            "ruleId": "s1-recon-tool-invoked",
-            "severity": "high",
-            "title": "S1 비승인 플러그인 도구 호출 차단 (ai_image_gen / ai_model_check)",
-            "message": "에이전트가 비승인 플러그인 도구를 호출하려 했습니다. Sentinel이 즉시 차단했습니다.",
-            "recommendedAction": "해당 플러그인을 제거하세요.",
-        }
-    ],
-    "S2": [
-        {
-            "pattern": r'["\'/]\.env["\'\\s]|\.env.*path|path.*\.env',
-            "ruleId": "s2-env-file-read",
-            "severity": "high",
-            "title": "S2 에이전트가 .env 파일을 읽으려 했습니다 — 차단됨",
-            "message": "프롬프트 인젝션에 의해 .env 파일 접근이 유도됐습니다. Sentinel이 즉시 차단했습니다.",
-            "recommendedAction": "외부 문서를 에이전트에 전달할 때 파일 접근 범위를 제한하세요.",
-        }
-    ],
-}
+from typing import Any
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from openclaw_ws import GwSession, new_req_id, rpc_sessions_reset  # noqa: E402
+
+REPO_ROOT = SCRIPTS_DIR.parent
+SENTINEL_DATA_DIR = SCRIPTS_DIR / "sentinel" / "data"
+SENTINEL_RULES_DIR = SCRIPTS_DIR / "sentinel" / "rules"
+WHITELIST_PATH = SENTINEL_DATA_DIR / "baseline-tools-effective.example.json"
+MD_SIGNATURES_PATH = SENTINEL_RULES_DIR / "md_signatures.yaml"
+
+# 파일 읽기 계열 도구 이름 패턴
+_READ_TOOL_PATTERN = re.compile(r"^(read|read_file|fs[._]read|file[._]read|cat|view)$", re.IGNORECASE)
+
+
+def _load_whitelist() -> set[str]:
+    """화이트리스트(baseline tool names) 로드. 파일 없으면 빈 set."""
+    try:
+        with WHITELIST_PATH.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+        names = data.get("tool_names")
+        if isinstance(names, list):
+            return {str(n) for n in names if n}
+    except Exception:
+        pass
+    return set()
+
+
+def _load_md_signatures() -> list[tuple[str, re.Pattern]]:
+    """md_signatures.yaml의 정규식 패턴을 (rule_id, compiled_re) 리스트로 반환."""
+    sigs: list[tuple[str, re.Pattern]] = []
+    try:
+        import yaml  # type: ignore
+        with MD_SIGNATURES_PATH.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        for rule in data.get("rules", []):
+            rid = str(rule.get("id") or "")
+            if not rid:
+                continue
+            match = rule.get("match") or {}
+            pat = match.get("pattern")
+            if not pat:
+                continue
+            try:
+                sigs.append((rid, re.compile(str(pat), re.IGNORECASE)))
+            except re.error:
+                continue
+    except Exception:
+        pass
+    return sigs
+
+
+def _deep_find(obj: Any, keys: tuple[str, ...], max_depth: int = 6) -> Any:
+    """payload에서 주어진 키 중 하나에 해당하는 첫 값을 재귀적으로 찾는다."""
+    if max_depth <= 0:
+        return None
+    if isinstance(obj, dict):
+        for k in keys:
+            if k in obj and obj[k] is not None:
+                return obj[k]
+        for v in obj.values():
+            r = _deep_find(v, keys, max_depth - 1)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _deep_find(v, keys, max_depth - 1)
+            if r is not None:
+                return r
+    return None
+
+
+def _extract_tool_name(payload: dict) -> str:
+    """session.tool 이벤트 payload에서 도구 이름 추출."""
+    val = _deep_find(payload, ("name", "toolName", "tool_name", "tool"))
+    return str(val).strip() if val else ""
+
+
+def _extract_file_path_from_args(payload: dict) -> str:
+    """tool 인자에서 파일 경로 후보를 추출. path/file/filename/filepath 키 중 첫 값."""
+    args = _deep_find(payload, ("args", "input", "arguments", "parameters", "params"))
+    if not args:
+        return ""
+    if isinstance(args, str):
+        # args가 JSON 문자열일 수도 있음
+        try:
+            args = json.loads(args)
+        except Exception:
+            return ""
+    val = _deep_find(args, ("path", "file", "filename", "filepath", "file_path"))
+    return str(val).strip() if val else ""
+
+
+def _resolve_md_path(raw_path: str) -> Path | None:
+    """파일 경로를 절대 경로로 해석. 상대 경로면 REPO_ROOT 기준."""
+    if not raw_path:
+        return None
+    try:
+        p = Path(raw_path)
+        if not p.is_absolute():
+            p = REPO_ROOT / p
+        p = p.resolve()
+        if not p.is_file():
+            return None
+        return p
+    except Exception:
+        return None
 
 
 async def main() -> None:
@@ -46,13 +133,20 @@ async def main() -> None:
     message = os.environ["OPENCLAW_SCENARIO_MESSAGE"]
     timeout = float(os.environ.get("CHAT_STREAM_TIMEOUT_S", "90"))
     chat_method = os.environ.get("OPENCLAW_CHAT_METHOD", "chat.send").strip() or "chat.send"
+    # 페어링 디바이스가 갖고 있지 않은 스코프를 요청하면 연결이 거부된다.
+    # OPENCLAW_GATEWAY_SCOPES 환경변수가 있으면 그대로 사용, 없으면 안전 기본값.
     reset_first = os.environ.get("OPENCLAW_RESET_SESSION_FIRST", "").strip() == "1"
-    scenario_id = os.environ.get("OPENCLAW_SCENARIO_ID", "").strip().upper()
-    scopes = ["operator.admin", "operator.write", "operator.read"] if reset_first else ["operator.write", "operator.read"]
+    request_admin = os.environ.get("OPENCLAW_REQUEST_ADMIN_SCOPE", "").strip() == "1"
+    scopes_env = os.environ.get("OPENCLAW_GATEWAY_SCOPES", "").strip()
+    if scopes_env:
+        scopes = [s.strip() for s in scopes_env.split(",") if s.strip()]
+    else:
+        scopes = ["operator.admin", "operator.write", "operator.read"] if request_admin else ["operator.write", "operator.read"]
 
-    block_rules = _SCENARIO_BLOCK_RULES.get(scenario_id, [])
-    blocked_rule_ids: set[str] = set()
-    realtime_findings_path = Path(__file__).resolve().parents[1] / "sentinel" / "data" / "findings-realtime.jsonl"
+    whitelist = _load_whitelist()
+    md_signatures = _load_md_signatures()
+    blocked_once = False  # 한 세션에서 차단은 한 번만
+    realtime_findings_path = SENTINEL_DATA_DIR / "findings-realtime.jsonl"
 
     sess = await GwSession.connect(
         ws_url,
@@ -62,31 +156,30 @@ async def main() -> None:
         scopes=scopes,
     )
 
-    if reset_first:
+    if reset_first and request_admin:
         try:
             await rpc_sessions_reset(sess, session_key, timeout_s=15.0)
         except Exception as e:
-            print(json.dumps({"type": "error", "message": f"sessions.reset failed: {e}"}), flush=True)
-            await sess.close()
-            return
+            # reset 실패는 치명적이지 않음 — 경고만 출력하고 chat.send 진행.
+            print(json.dumps({"type": "warn", "message": f"sessions.reset skipped: {e}"}), flush=True)
+    elif reset_first:
+        # admin 스코프 없이는 reset 불가 — 알리기만 하고 계속 진행
+        print(json.dumps({"type": "info", "message": "sessions.reset skipped (operator.admin scope not requested)"}), flush=True)
 
     done_event = asyncio.Event()
-    # chat.send 이전 replay 이벤트는 출력하지 않고, done 판단도 하지 않는다
     chat_sent = False
-    # 마지막으로 이벤트가 도착한 시각 (chat_sent 이후)
     last_event_ts: list[float] = [0.0]
-    # 에이전트 응답(non-user message)을 하나라도 받았는지
     seen_non_user_msg: list[bool] = [False]
 
-    async def _write_block_finding(rule: dict) -> None:
+    async def _write_block_finding(rule_id: str, severity: str, title: str, message: str, recommended: str) -> None:
         """findings-realtime.jsonl에 차단 finding을 즉시 기록하고 스트림을 종료한다."""
         finding = {
             "id": str(uuid.uuid4()),
-            "ruleId": rule["ruleId"],
-            "severity": rule["severity"],
-            "title": rule["title"],
-            "message": rule["message"],
-            "recommendedAction": rule["recommendedAction"],
+            "ruleId": rule_id,
+            "severity": severity,
+            "title": title,
+            "message": message,
+            "recommendedAction": recommended,
             "timestamp": _time.strftime("%Y-%m-%dT%H:%M:%S", _time.gmtime()) + "Z",
         }
         try:
@@ -95,30 +188,65 @@ async def main() -> None:
                 f.write(json.dumps(finding, ensure_ascii=False) + "\n")
         except Exception:
             pass
-        # 스트림 즉시 종료 (에이전트 응답이 프론트엔드에 전달되지 않도록)
         done_event.set()
-        # sessions.abort 호출 (best effort, 스트림 종료 후)
         try:
             await sess.rpc("sessions.abort", {"key": session_key}, timeout_s=5.0)
         except Exception:
             pass
 
+    def _check_md_signature(file_path: Path) -> str | None:
+        """파일 내용에 Vigil 시그니처가 일치하면 그 rule_id 반환, 아니면 None."""
+        if not md_signatures:
+            return None
+        try:
+            content = file_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return None
+        for rid, cre in md_signatures:
+            if cre.search(content):
+                return rid
+        return None
+
     async def on_event(msg: dict) -> None:
+        nonlocal blocked_once
         if not chat_sent:
             return
 
-        # S1/S2 시나리오: session.tool 이벤트에서 위협 패턴 감지 → 즉시 차단
-        if block_rules and msg.get("event") == "session.tool":
-            msg_text = json.dumps(msg, ensure_ascii=False)
-            for rule in block_rules:
-                rid = rule["ruleId"]
-                if rid in blocked_rule_ids:
-                    continue
-                if re.search(rule["pattern"], msg_text, re.IGNORECASE):
-                    blocked_rule_ids.add(rid)
-                    print(json.dumps(msg, ensure_ascii=False), flush=True)
-                    asyncio.ensure_future(_write_block_finding(rule))
-                    return  # 이 이벤트 이후 에이전트 응답은 전달하지 않음
+        if not blocked_once and msg.get("event") == "session.tool":
+            payload = msg.get("payload") or {}
+            tool_name = _extract_tool_name(payload)
+
+            # ① 악성 플러그인 탐지 — 화이트리스트 외 도구 호출
+            if whitelist and tool_name and tool_name not in whitelist:
+                blocked_once = True
+                print(json.dumps(msg, ensure_ascii=False), flush=True)
+                asyncio.ensure_future(_write_block_finding(
+                    rule_id="whitelist-violation",
+                    severity="high",
+                    title="악성 플러그인 탐지 — 화이트리스트 외 도구 호출 차단",
+                    message=f"화이트리스트에 없는 도구 '{tool_name}' 호출이 차단되었습니다.",
+                    recommended="해당 플러그인을 제거하거나, 신뢰할 수 있는 도구라면 화이트리스트에 추가하세요.",
+                ))
+                return
+
+            # ② 악성 MD 탐지 — 읽기 도구가 .md 파일을 읽으려 할 때 시그니처 사전 검사
+            if md_signatures and tool_name and _READ_TOOL_PATTERN.match(tool_name):
+                raw_path = _extract_file_path_from_args(payload)
+                if raw_path.lower().endswith(".md"):
+                    resolved = _resolve_md_path(raw_path)
+                    if resolved is not None:
+                        matched_sig = _check_md_signature(resolved)
+                        if matched_sig:
+                            blocked_once = True
+                            print(json.dumps(msg, ensure_ascii=False), flush=True)
+                            asyncio.ensure_future(_write_block_finding(
+                                rule_id="md-signature-block",
+                                severity="high",
+                                title="악성 MD 탐지 — 인젝션 시그니처 차단",
+                                message=f"파일 '{raw_path}'에서 인젝션 시그니처 '{matched_sig}' 감지로 차단되었습니다.",
+                                recommended="신뢰할 수 없는 마크다운 문서를 에이전트에 전달하지 마세요.",
+                            ))
+                            return
 
         if done_event.is_set():
             return
@@ -129,14 +257,12 @@ async def main() -> None:
         payload = msg.get("payload") or {}
 
         if event == "session.message":
-            # role은 payload.message.role 에 있음 (payload 최상위 kind는 세션 타입)
             msg_obj = payload.get("message")
             if isinstance(msg_obj, dict):
                 role = str(msg_obj.get("role", "")).lower()
             else:
                 role = str(payload.get("role", "")).lower()
             if role and role not in ("user", "human"):
-                # 즉시 done 처리하지 않음 — tool call + 최종 응답이 뒤따를 수 있음
                 seen_non_user_msg[0] = True
 
         elif event == "chat":
@@ -153,11 +279,9 @@ async def main() -> None:
 
     sess.on_event(on_event)
 
-    # 구독 (이 단계의 replay 이벤트는 chat_sent=False 라 무시됨)
     await sess.rpc("sessions.messages.subscribe", {"key": session_key})
     await sess.rpc("sessions.subscribe", {"key": session_key})
 
-    # chat.send 전송 — 이후 이벤트부터 출력 및 done 판단
     chat_sent = True
     last_event_ts[0] = _time.monotonic()
     params: dict = {"sessionKey": session_key, "message": message, "idempotencyKey": new_req_id()}
@@ -168,10 +292,6 @@ async def main() -> None:
         await sess.close()
         return
 
-    # 종료 조건:
-    # 1) chat/agent done 이벤트 수신 → 즉시 종료
-    # 2) 응답을 받은 뒤 QUIESCENCE_S초 동안 새 이벤트 없음 → 에이전트 완료로 간주
-    # 3) 전체 timeout 초과
     QUIESCENCE_S = 6.0
     deadline = _time.monotonic() + timeout
     while True:

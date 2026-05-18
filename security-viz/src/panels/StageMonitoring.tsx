@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFindings, type SentinelFinding } from "../sentinel/useFindings";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
 import type { NavAction } from "../App";
+import { ScenarioFlowTrace } from "../components/ScenarioFlowTrace";
 
 // ── 탐지 유형 분류 ────────────────────────────────────────────────────────
 
@@ -9,9 +10,9 @@ type DetectCategory = "plugin" | "md" | "abuse" | "other";
 
 function categorize(f: SentinelFinding): DetectCategory {
   const id = f.ruleId.toLowerCase();
-  if (id.includes("s1") || id.includes("plugin") || id.includes("supply")) return "plugin";
-  if (id.includes("s2") || id.includes("injection") || id.includes("readme") || id.includes("md") || id.includes("prompt")) return "md";
-  if (id.includes("s3") || id.includes("rate") || id.includes("abuse") || id.includes("loop") || id.includes("exhaustion")) return "abuse";
+  if (id === "whitelist-violation" || id.includes("plugin") || id.includes("supply")) return "plugin";
+  if (id === "md-signature-block" || id.includes("injection") || id.includes("readme") || id.includes("md-") || id.includes("vigil") || id.includes("prompt")) return "md";
+  if (id.includes("rate") || id.includes("abuse") || id.includes("loop") || id.includes("exhaustion")) return "abuse";
   return "other";
 }
 
@@ -104,37 +105,6 @@ function DonutChart({ plugin, md, abuse, other }: DonutProps) {
 
 function SevBadge({ sev }: { sev: string }) {
   return <span className={`sev-badge sev-${sev}`}>{sev.toUpperCase()}</span>;
-}
-
-// ── 실행 흐름 (타임라인 이벤트) ───────────────────────────────────────────
-
-function ExecutionFlow({ finding, timeline }: { finding: SentinelFinding; timeline: TimelineEntry[] }) {
-  if (!finding.timestamp) {
-    return <p className="mon-flow-empty">타임스탬프 정보가 없어 실행 흐름을 표시할 수 없습니다.</p>;
-  }
-  const ts = new Date(finding.timestamp).getTime();
-  const window = 30_000;
-  const relevant = timeline.filter((e) => {
-    if (e.kind !== "session.tool" && e.kind !== "session.message") return false;
-    return Math.abs(e.at - ts) <= window;
-  });
-
-  if (relevant.length === 0) {
-    return <p className="mon-flow-empty">탐지 시점(±30초) 내 이벤트가 없습니다.</p>;
-  }
-
-  return (
-    <div className="mon-flow-list">
-      {relevant.map((e) => (
-        <div key={e.id} className={`mon-flow-item mon-flow-${e.kind === "session.tool" ? "tool" : "msg"}`}>
-          <span className="mon-flow-time">{new Date(e.at).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
-          <span className="mon-flow-kind">{e.kind === "session.tool" ? "🔧" : "💬"}</span>
-          <span className="mon-flow-title">{e.title}</span>
-          {e.subtitle && <span className="mon-flow-sub">{e.subtitle}</span>}
-        </div>
-      ))}
-    </div>
-  );
 }
 
 // ── 조치 안내 ─────────────────────────────────────────────────────────────
@@ -251,7 +221,11 @@ function HistoryItem({
           )}
           <div className="mon-detail-section">
             <div className="mon-detail-label">실행 흐름</div>
-            <ExecutionFlow finding={finding} timeline={timeline} />
+            <ScenarioFlowTrace
+              entries={timeline}
+              highlightFindingId={finding.id}
+              anchorTimestamp={finding.timestamp ? new Date(finding.timestamp).getTime() : null}
+            />
           </div>
           <div className="mon-detail-section">
             <div className="mon-detail-label">조치</div>

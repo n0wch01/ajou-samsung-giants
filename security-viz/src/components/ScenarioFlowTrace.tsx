@@ -506,16 +506,42 @@ function enrichToolDisplayOutputs(
 
 // ── 턴 파싱 ───────────────────────────────────────────────
 
-function getLastScenarioTurn(entries: TimelineEntry[], approvalMap: Record<string, boolean>): ScenarioTurn | null {
-  // 마지막 사용자 메시지 위치
-  let lastUserIdx = -1;
-  for (let i = entries.length - 1; i >= 0; i--) {
+function findUserIndexAtTime(entries: TimelineEntry[], targetMs: number): number {
+  // targetMs 이하의 user message 중 가장 최근 인덱스를 반환. 없으면 -1.
+  let bestIdx = -1;
+  let bestDelta = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < entries.length; i++) {
     const e = entries[i];
-    if (e.kind === "session.message" || e.kind === "chat") {
-      const p = payloadOf(e);
-      const role = getRole(p, e.kind);
-      const text = getText(p) || e.subtitle || "";
-      if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+    if (e.kind !== "session.message" && e.kind !== "chat") continue;
+    const p = payloadOf(e);
+    const role = getRole(p, e.kind);
+    const text = getText(p) || e.subtitle || "";
+    if (!isUser(role) || !text.trim()) continue;
+    const delta = targetMs - e.at;
+    // target 이전(또는 정확히)이면서 가장 가까운 user turn
+    if (delta >= -60_000 && delta < bestDelta) {
+      bestDelta = delta;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
+}
+
+function getLastScenarioTurn(entries: TimelineEntry[], approvalMap: Record<string, boolean>, anchorMs?: number | null): ScenarioTurn | null {
+  // anchorMs가 주어지면 그 시점에 가장 가까운 user turn 선택. 아니면 마지막 user turn.
+  let lastUserIdx = -1;
+  if (anchorMs != null && Number.isFinite(anchorMs)) {
+    lastUserIdx = findUserIndexAtTime(entries, anchorMs);
+  }
+  if (lastUserIdx === -1) {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i];
+      if (e.kind === "session.message" || e.kind === "chat") {
+        const p = payloadOf(e);
+        const role = getRole(p, e.kind);
+        const text = getText(p) || e.subtitle || "";
+        if (isUser(role) && text.trim()) { lastUserIdx = i; break; }
+      }
     }
   }
   if (lastUserIdx === -1) return null;
@@ -940,6 +966,10 @@ type ScenarioFlowTraceProps = {
   entries: TimelineEntry[];
   sessionKey?: string;
   scenarioId?: string | null;
+  /** Monitoring 탭에서 finding 시점을 기준으로 turn을 선택할 때 사용 (ms epoch). */
+  anchorTimestamp?: number | null;
+  /** Monitoring 탭에서 강조할 finding id (현재는 시각적 강조 용도만). */
+  highlightFindingId?: string | null;
 };
 
 // ── Exfil 로그 훅 ─────────────────────────────────────────────
@@ -1154,9 +1184,13 @@ function usePluginApprovalMap(): Record<string, boolean> {
   return map;
 }
 
-export function ScenarioFlowTrace({ entries, sessionKey, scenarioId }: ScenarioFlowTraceProps) {
+export function ScenarioFlowTrace({ entries, sessionKey, scenarioId, anchorTimestamp, highlightFindingId }: ScenarioFlowTraceProps) {
+  void highlightFindingId; // 현재는 미사용 (향후 banner 강조에 활용)
   const pluginApprovalMap = usePluginApprovalMap();
-  const turn = useMemo(() => getLastScenarioTurn(entries, pluginApprovalMap), [entries, pluginApprovalMap]);
+  const turn = useMemo(
+    () => getLastScenarioTurn(entries, pluginApprovalMap, anchorTimestamp),
+    [entries, pluginApprovalMap, anchorTimestamp],
+  );
 
   const hasPluginTool = turn?.hasPluginTool ?? false;
   const rtFindings = useRealtimeFindings(hasPluginTool || scenarioId === "S3" || scenarioId === "S2", turn?.at);
