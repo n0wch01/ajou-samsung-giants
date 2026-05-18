@@ -1217,7 +1217,6 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
           placeholder="메시지 입력 (Shift+Enter 줄바꿈, Enter 전송)"
           value={text}
           rows={1}
-          disabled={sending}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
         />
