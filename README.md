@@ -1,4 +1,4 @@
-# End to End AI Agent 보안 가시화 (COONTEC Co., Ltd.)
+# End-to-End AI Agent 보안 가시화 (COONTEC Co., Ltd.)
 
 <p align="center">
   <img src="photo/chitoclaw1.png" alt="치토와 치토클로 — 야구장 액션 비주얼" width="49%" />
@@ -12,9 +12,7 @@
 1. [OpenClaw (대상 에이전트)](#openclaw-대상-에이전트)
 2. [SSOT](#ssot)
 3. [빠른 시작](#빠른-시작)
-4. [팀원 실행 가이드](#팀원-실행-가이드)
-5. [구성 요약](#구성-요약)
-6. [테스트](#테스트)
+4. [구성 요약](#구성-요약)
 
 ---
 
@@ -36,7 +34,15 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
 
 ## SSOT
 
-시나리오 카피는 UI와 러너가 맞춥니다: `security-viz/src/scenarioRegistry.ts` ↔ `scripts/runner/send_scenario.py` (`S1_DEFAULT_MESSAGE` 주석 참고).
+**단일 출처(Single Source of Truth).** 시나리오 기본 프롬프트는 UI와 러너가 동일해야 합니다. 한쪽만 수정하면 재현이 어긋납니다.
+
+| 시나리오 | UI (`scenarioRegistry.ts`) | Runner (`send_scenario.py`) |
+|----------|----------------------------|-----------------------------|
+| S1 | `S1_DEFAULT_SCENARIO_MESSAGE` | `S1_DEFAULT_MESSAGE` |
+| S2 | `defaultMessage` (S2 항목) | `S2_DEFAULT_MESSAGE` |
+| S3 | `S3_DEFAULT_SCENARIO_MESSAGE` | `S3_DEFAULT_MESSAGE` |
+
+시나리오 본문·절차의 SSOT는 각각 `scenarios/s1-plugin-supply-chain.md`, `s2-data-leakage.md`, `s3-api-abuse.md`이며, 인덱스는 [scenarios/catalog.yaml](scenarios/catalog.yaml)입니다.
 
 ---
 
@@ -46,120 +52,14 @@ OpenClaw는 LLM을 기반으로 실제 작업을 수행하는 오픈소스 AI Au
    [scripts/README.md](scripts/README.md) — venv, `pip install -r scripts/requirements.txt`, `PYTHONPATH=scripts` 로 `ingest` / `detect` / `respond` / `send_scenario` 실행.
 
 2. **대시보드 (security-viz)**  
-   저장소 루트에서 `./run-viz.sh` 를 쓰면 (선택) `OPENCLAW_GATEWAY_WS_URL`·토큰이 있을 때 ingest와 Vite dev를 함께 띄웁니다. `Ctrl+C` 로 종료하면 Sentinel ingest, Vite 서버, OpenClaw 게이트웨이가 모두 함께 종료됩니다. 수동으로는 `cd security-viz && npm install && npm run dev` 후 브라우저에서 연결·토큰 입력.
-   S1 시나리오 카드의 `플러그인 설치` 버튼은 `mock-malicious-plugin`(`ai-image-toolkit`) 설치 뒤 `plugins.allow`/`plugins.entries`를 보정하고 `openclaw gateway restart`까지 자동 수행합니다. `플러그인 제거`는 확장 디렉터리와 `entries`/`installs`/`allow`에서 해당 id를 함께 정리합니다.
-   탐지 결과는 상단 **Monitoring** 탭에서 확인합니다. (Sentinel ingest는 `run-viz.sh`·터미널에서 `ingest.py`로 병행 가능.)
+   저장소 루트에서 `./run-viz.sh`를 실행합니다. OpenClaw 게이트웨이를 시작·재시작한 뒤, `OPENCLAW_GATEWAY_WS_URL`과 `OPENCLAW_GATEWAY_TOKEN`이 설정되어 있으면 Sentinel ingest와 Vite dev 서버를 함께 띄웁니다.  
+   `Ctrl+C`로 종료하면 Sentinel ingest와 Vite는 종료되고, OpenClaw 게이트웨이는 `[Y/n]` 프롬프트에 따라 유지하거나 `openclaw gateway stop`으로 종료할 수 있습니다.  
+   수동 실행: `cd security-viz && npm install && npm run dev` — 브라우저에서 WebSocket URL·토큰·세션 키를 입력합니다.  
+   S1 시나리오 카드의 **플러그인 설치**는 `mock-malicious-plugin`(플러그인 id: `ai-image-toolkit`)을 설치하고 `plugins.allow` / `plugins.entries`를 보정한 뒤 `openclaw gateway restart`까지 수행합니다. **플러그인 제거**는 확장 디렉터리와 `entries` / `installs` / `allow`에서 해당 id를 정리합니다.  
+   탐지 결과는 **Monitoring** 탭에서 확인합니다.
 
 3. **S1 랩 플러그인**  
    [mock-malicious-plugin/README.md](mock-malicious-plugin/README.md) — 공급망 시나리오용 **랩 전용** 목업 플러그인입니다.
-
----
-
-## 팀원 실행 가이드
-
-> `dev` 브랜치 기준. 아래 순서대로 따라하면 S1·S2·S3 시나리오를 전부 실행할 수 있습니다.
-
-### 1. 브랜치 받기
-
-```bash
-git fetch origin
-git checkout dev
-git pull origin dev
-```
-
-### 2. Python 의존성 설치 (최초 1회)
-
-```bash
-# 프로젝트 루트에서
-pip install websockets cryptography
-
-# 또는 venv를 사용하는 경우
-python -m venv .venv
-# Windows
-.venv\Scripts\activate
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r scripts/requirements.txt
-```
-
-### 3. OpenClaw 게이트웨이 시작
-
-```bash
-openclaw gateway start
-```
-
-> 이미 실행 중이라면 `openclaw gateway restart` 로 재시작합니다.
-
-### 4. Gateway Token 발급
-
-```bash
-openclaw gateway token
-```
-
-출력된 토큰을 복사해 둡니다.
-
-### 5. 디바이스 페어링 승인 (최초 1회 또는 스코프 변경 시)
-
-시나리오 실행 시 `chat.send`가 필요로 하는 `operator.write` 스코프가 디바이스 페어링에 없으면
-연결 시점에 게이트웨이가 거부합니다. 다음 명령으로 보류 중인 페어링 요청을 확인하고 승인하세요.
-
-```bash
-# 보류 중인 페어링/스코프 업그레이드 요청 확인
-openclaw devices list
-
-# 가장 최근 요청 자동 승인 (간편)
-openclaw devices approve --latest
-
-# 또는 특정 요청 ID 지정
-openclaw devices approve <requestId>
-```
-
-> 다음과 같은 에러가 나오면 위 명령을 실행해야 합니다.
-> ```
-> connect failed: pairing required scope-upgrade: device is paired with fewer scopes
-> than OPENCLAW_GATEWAY_SCOPES. (requestId=...)
-> ```
-
-### 6. Vite 개발 서버 시작
-
-```bash
-cd security-viz
-npm install   # 최초 1회
-npm run dev
-```
-
-브라우저에서 **http://localhost:5173** 접속.
-
-> 이미 다른 Vite 프로세스가 켜져 있으면 포트가 5174로 올라갑니다.  
-> 중복 방지를 위해 재시작 전 기존 터미널에서 `Ctrl+C`로 종료하세요.
-
-### 7. 브라우저에서 연결 설정
-
-왼쪽 **CONNECTION PANEL** 에 아래 값을 입력하고 **Connect** 클릭:
-
-| 항목 | 값 |
-|------|----|
-| WebSocket URL | `ws://127.0.0.1:18789` |
-| Session Key | `agent:main:main` |
-| Gateway Token | 4번에서 발급한 토큰 |
-
-GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
-
-### 8. 시나리오 실행
-
-**Test Scenario** 탭에서 S1·S2·S3 카드의 **시나리오 실행** 버튼을 누릅니다.
-
-| 시나리오 | 설명 | 비고 |
-|----------|------|------|
-| S1 | 악성 플러그인 공급망 공격 | 첫 실행 시 플러그인 자동 설치 |
-| S2 | README Prompt Injection 데이터 유출 | — |
-| S3 | API Abuse / Denial of Wallet | Guardrail ON/OFF 고급 옵션 참고 |
-
-### 주의사항
-
-- **Policy** 탭의 `정책 설정 확인` / `도구 목록 확인` 은 `~/.openclaw/identity/device.json` 이 있어야 동작합니다 (OpenClaw CLI 설치 후 페어링 완료 상태).
-- `vite-plugin-sentinel.ts` 를 수정했다면 `npm run dev` 를 재시작해야 반영됩니다.
 
 ---
 
@@ -169,6 +69,7 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 
 - 디렉터리: `scenarios/`
 - 카탈로그: [scenarios/catalog.yaml](scenarios/catalog.yaml)
+- 활성 시나리오: **S1** 악성 플러그인 공급망 · **S2** README 프롬프트 인젝션(데이터 유출) · **S3** API 남용 / Denial of Wallet
 
 ### Python `scripts/`
 
@@ -176,8 +77,8 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 |----------|------|
 | `scripts/openclaw_ws.py` | 게이트웨이 WebSocket 클라이언트 (`connect`, RPC, 이벤트) |
 | `scripts/sentinel/ingest.py` | 구독·정규화·append-only `data/trace.jsonl`, `tools.effective` / `tools.catalog` 스냅샷 |
-| `scripts/sentinel/detect.py` | `RealTimeRateDetector` 클래스 정의(`ingest.py`가 사용). 악성 MD 시그니처는 오픈소스 [vigil-llm](https://github.com/deadbits/vigil-llm)(Apache-2.0)에서 포팅 |
-| `scripts/runner/chat_stream.py` | 화이트리스트 기반 도구 차단 + `md_signatures.yaml` 기반 MD 사전 검사. 차단 시 `findings-realtime.jsonl`에 기록 |
+| `scripts/sentinel/detect.py` | `RealTimeCombinedDetector`(율·패턴 룰, `ingest.py`가 사용). 악성 MD 시그니처는 [vigil-llm](https://github.com/deadbits/vigil-llm)(Apache-2.0) YARA 카테고리 정규식 포팅 + 한국어 보강 ([scripts/sentinel/README.md](scripts/sentinel/README.md)) |
+| `scripts/runner/chat_stream.py` | 화이트리스트 기반 도구 차단 + `.md` 파일 읽기 사전 검사(`md_signatures.yaml`). 시그니처 매칭 시 즉시 `sessions.abort` 호출하고 `findings-realtime.jsonl`에 `md-signature-block` 기록 |
 | `scripts/sentinel/respond.py` | 알림·`findings-latest.json`, 조건부 `sessions.abort` |
 | `scripts/runner/send_scenario.py` | `OPENCLAW_GATEWAY_*` 로 접속해 `chat.send` 등 시나리오 주입 |
 | `scripts/runner/toggle_guardrail.py`, `check_plugin.py` | 러너 보조 스크립트 ([runner/README.md](scripts/runner/README.md)) |
@@ -187,20 +88,5 @@ GATEWAY STATUS가 **Live Monitoring** 으로 바뀌면 준비 완료.
 
 React/Vite: 게이트웨이 **읽기 전용** 구독, 타임라인·단계 패널, Sentinel findings 폴링·SSE.
 
-- S1 시나리오 메시지 옵션은 단일 `권장 기본`만 사용합니다(툴 호출 경로 이탈 감소 목적).
-- 실행 흐름 패널은 S1에서 `ai_image_gen` 호출 여부를 기준으로 성공 시에만 `S1 성공` 배지를 표시합니다.
-
----
-
-## 테스트
-
-```bash
-cd security-viz && npm test
-```
-
-```bash
-cd /path/to/SG
-python3 -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r scripts/requirements.txt
-PYTHONPATH=scripts python -m pytest scripts/tests -q
-```
+- 시나리오 탭은 `scenarioRegistry.ts`의 `defaultMessage`만 사용합니다(변형 프롬프트 없음).
+- 실행 흐름 패널: S1·S2·S3에서 탐지·차단 맥락이 잡히면 헤더에 `BLOCKED` 배지를 표시합니다.
