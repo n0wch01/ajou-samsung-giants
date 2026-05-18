@@ -36,9 +36,10 @@ a {
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .app-header {
@@ -1497,6 +1498,9 @@ details[open] .sc-advanced-summary::before { transform: rotate(90deg); }
   padding: 8px 10px;
   background: #101c2f;
   border-top: 1px solid #1a2e4a;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
 }
 
 .chat-input-row {
