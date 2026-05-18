@@ -933,12 +933,22 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
     setBlockedNotifs((prev) => [...prev, ...newOnes]);
   }, [findings, props.connectedAt, turns]);
 
-  // finding 발생 시각 이후 에이전트 답변은 숨김 (공격 차단 시 에이전트 응답 표시 방지)
-  const firstBlockAt = useMemo(() => {
-    if (blockedNotifs.length === 0) return null;
-    const ts = blockedNotifs[0].timestamp;
-    return ts ? new Date(ts).getTime() : null;
-  }, [blockedNotifs]);
+  // 차단 finding이 발생한 "그 턴"의 assistant 응답만 숨김 (이후 정상 턴까지 숨겨지지 않도록 턴 윈도우로 한정)
+  const blockedTurnIds = useMemo(() => {
+    const result = new Set<string>();
+    if (blockedNotifs.length === 0) return result;
+    const blockTimes = blockedNotifs
+      .map((f) => (f.timestamp ? new Date(f.timestamp).getTime() : null))
+      .filter((t): t is number => t !== null);
+    for (let i = 0; i < turns.length; i++) {
+      const t = turns[i];
+      const windowEnd = i + 1 < turns.length ? turns[i + 1].at : Infinity;
+      if (blockTimes.some((bt) => bt >= t.at && bt < windowEnd)) {
+        result.add(t.id);
+      }
+    }
+    return result;
+  }, [turns, blockedNotifs]);
 
   // turns + blockedNotifs를 시각순으로 병합, finding 이후 assistant 답변 숨김
   const chatItems = useMemo(() => {
@@ -1061,8 +1071,8 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
             );
           }
           const turn = item.turn;
-          // 차단 finding이 하나라도 있으면 에이전트 응답 전체 숨김 (사전 텍스트 포함)
-          const suppressAssistant = firstBlockAt !== null && turn.assistantChunks.length > 0;
+          // 차단이 이 턴 안에서 발생한 경우에만 응답 숨김 (이후 정상 턴은 그대로 표시)
+          const suppressAssistant = blockedTurnIds.has(turn.id) && turn.assistantChunks.length > 0;
           return (
             <div key={turn.id} className="kakao-turn">
               <time className="kakao-time" dateTime={new Date(turn.at).toISOString()}>
@@ -1200,6 +1210,8 @@ function ChatInput(props: { wsUrl: string; token: string; sessionKey: string; in
   }, [text, sending, sendViaGateway]);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // 한글/일본어 등 IME 조합 중 Enter는 조합 확정용이므로 전송하지 않음
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void send();

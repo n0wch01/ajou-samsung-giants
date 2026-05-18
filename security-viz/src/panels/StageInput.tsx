@@ -41,7 +41,6 @@ export function StageInput(props: StageInputProps) {
       <div className="cp-header">
         <span className="cp-header-title">Gateway 연결</span>
         <span className="cp-header-sub">AI Agent Monitor</span>
-        <span className="cp-header-desc">AI 에이전트의 활동을 실시간으로 모니터링하기 위한 연결 설정입니다.</span>
       </div>
 
       {/* 상태 카드 */}
@@ -89,14 +88,12 @@ export function StageInput(props: StageInputProps) {
             placeholder="operator token"
             autoComplete="off"
           />
-          <span className="cp-field-hint">게이트웨이 접근 인증 토큰입니다. 관리자로부터 발급받아 입력하세요.</span>
+          <span className="cp-field-hint">게이트웨이 접근 인증 토큰입니다. 관리자로부터 발급받거나 로컬 실행의 경우 로컬의 토큰을 입력하세요.</span>
         </div>
       </div>
 
       {/* 액션 버튼 */}
       <div className="cp-section">
-        <span className="cp-section-label">Actions</span>
-        <p className="cp-action-desc">연결하면 에이전트의 도구 호출과 보안 이벤트를 실시간으로 확인할 수 있습니다.</p>
         <div className="cp-btn-row">
           <button className="cp-btn-connect" type="button" disabled={busy} onClick={props.onConnect}>
             {busy ? "Connecting…" : "Connect"}
