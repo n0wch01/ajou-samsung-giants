@@ -657,9 +657,15 @@ function getLastScenarioTurn(entries: TimelineEntry[], approvalMap: Record<strin
   const hasTools = tools.length > 0;
   const allToolsDone = hasTools && tools.every((t) => t.hasResult);
   const hasResponse = responseText.trim().length > 0;
-  const llmStatus: StepStatus = hasTools || hasResponse ? "done" : "active";
-  const toolStatus: StepStatus = !hasTools ? "pending" : allToolsDone || hasResponse ? "done" : "active";
-  const responseStatus: StepStatus = hasResponse ? "done" : hasTools && allToolsDone ? "active" : "pending";
+  // anchorMs가 있으면 historical 조회 — 미완료여도 "active"가 아니라 "done"으로 표시
+  const isHistorical = anchorMs != null && Number.isFinite(anchorMs);
+  const llmStatus: StepStatus = hasTools || hasResponse ? "done" : (isHistorical ? "done" : "active");
+  const toolStatus: StepStatus = !hasTools
+    ? "pending"
+    : (allToolsDone || hasResponse || isHistorical) ? "done" : "active";
+  const responseStatus: StepStatus = hasResponse
+    ? "done"
+    : (isHistorical ? "done" : (hasTools && allToolsDone ? "active" : "pending"));
   const toolNames = Array.from(new Set(tools.map((t) => t.name).filter((n) => !isGenericToolName(n))));
   const hasTargetTool = toolNames.includes("ai_image_gen");
   const hasEnvRead = tools.some((t) => t.args.toLowerCase().includes(".env") || t.output.toLowerCase().includes(".env"));
@@ -737,7 +743,7 @@ function ScenarioToolBodyToggle({
   );
 }
 
-function ToolBlock({ tool }: { tool: ParsedTool }) {
+function ToolBlock({ tool, isHistorical }: { tool: ParsedTool; isHistorical?: boolean }) {
   const showOut = tool.displayOutput.trim() || tool.output.trim();
   const hasArgs = Boolean(tool.args.trim());
   const [argsOpen, setArgsOpen] = useState(false);
@@ -748,7 +754,11 @@ function ToolBlock({ tool }: { tool: ParsedTool }) {
         <span className="ft-tool-icon">{tool.isMalicious ? "🔴" : tool.isApprovedPlugin ? "🟢" : "🔧"}</span>
         <code className="ft-code ft-scenario-tool-name">{tool.name}</code>
         {tool.isApprovedPlugin && <span className="ft-badge-approved">승인 플러그인</span>}
-        {!showOut && <span className="ft-badge-running">실행 중…</span>}
+        {!showOut && (
+          isHistorical
+            ? <span className="ft-badge-blocked">차단됨</span>
+            : <span className="ft-badge-running">실행 중…</span>
+        )}
       </div>
       {tool.isMalicious && (
         <div className="ft-detection-reason">
@@ -1350,7 +1360,7 @@ export function ScenarioFlowTrace({ entries, sessionKey, scenarioId, anchorTimes
                       </div>
                     )}
                     {turn.tools.map((t) => (
-                      <ToolBlock key={t.id} tool={t} />
+                      <ToolBlock key={t.id} tool={t} isHistorical={anchorTimestamp != null} />
                     ))}
                   </Step>
                 </>
