@@ -40,18 +40,18 @@ function blockedCategory(ruleId: string): string {
 function BlockedBubble({ finding, onNavigate }: { finding: SentinelFinding; onNavigate?: (a: NavAction) => void }) {
   const catLabel = blockedCategory(finding.ruleId);
   return (
-    <div className="kakao-blocked-notif">
-      <div className="kakao-blocked-icon">🚫</div>
-      <div className="kakao-blocked-body">
-        <div className="kakao-blocked-header">
-          <span className="kakao-blocked-title">보안 위협 탐지 및 차단됨</span>
-          <span className="kakao-blocked-cat">{catLabel}</span>
+    <div className="chat-blocked-notif">
+      <div className="chat-blocked-icon">🚫</div>
+      <div className="chat-blocked-body">
+        <div className="chat-blocked-header">
+          <span className="chat-blocked-title">보안 위협 탐지 및 차단됨</span>
+          <span className="chat-blocked-cat">{catLabel}</span>
         </div>
-        <div className="kakao-blocked-msg">{finding.title}</div>
+        <div className="chat-blocked-msg">{finding.title}</div>
         {onNavigate && (
           <button
             type="button"
-            className="kakao-blocked-btn"
+            className="chat-blocked-btn"
             onClick={() => onNavigate({ tab: "monitoring", highlightFindingId: finding.id })}
           >
             Monitoring 탭에서 확인 →
@@ -989,9 +989,9 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
 
   if (props.connState !== "ready") {
     return (
-      <section className="kakao-room kakao-room-empty">
+      <section className="chat-room chat-room-empty">
         <div className="chat-empty-state">
-          <img src={publicAsset("chitoclaw2.png")} alt="chito and openclaw" className="kakao-empty-illust" />
+          <img src={publicAsset("photo/claw.png")} alt="openclaw" className="chat-empty-illust" />
           <h3 className="chat-empty-title">Gateway Not Connected</h3>
           <p className="chat-empty-desc">
             왼쪽 패널에서 WebSocket URL과 토큰을 입력한 뒤<br />
@@ -1013,15 +1013,14 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
     turns.length === 0 && orphanTools.length === 0 && orphanAssistantChunks.length === 0;
 
   return (
-    <section className="kakao-room">
-      <div className="kakao-room-title">
-        <img src={publicAsset("chito.png")} alt="chito" className="kakao-room-avatar" />
+    <section className="chat-room">
+      <div className="chat-room-title">
         채팅
       </div>
-      <div className="kakao-room-scroll" ref={scrollRef}>
+      <div className="chat-room-scroll" ref={scrollRef}>
         {empty ? (
           <div className="chat-empty-state chat-empty-state-inline">
-            <img src={publicAsset("chito.png")} alt="chito" className="kakao-empty-illust" />
+            <img src={publicAsset("photo/chitoclaw4.png")} alt="chito and openclaw" className="chat-empty-illust" style={{ width: 200, height: 200 }} />
             <h3 className="chat-empty-title">No session activity yet</h3>
             <p className="chat-empty-desc">
               테스트 프롬프트를 입력하면 Agent 응답과<br />보안 이벤트가 이곳에 실시간으로 표시됩니다.
@@ -1036,10 +1035,10 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         ) : null}
 
         {orphanAssistantChunks.length > 0 ? (
-          <div className="kakao-orphan">
-            <div className="kakao-orphan-label">사용자 메시지 이전 답변</div>
-            <div className="kakao-row-assistant">
-              <div className="kakao-bubble-assistant kakao-bubble-md">
+          <div className="chat-orphan">
+            <div className="chat-orphan-label">사용자 메시지 이전 답변</div>
+            <div className="chat-row-assistant">
+              <div className="chat-bubble-assistant chat-bubble-md">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                   {orphanAssistantChunks.join("\n\n")}
                 </ReactMarkdown>
@@ -1049,8 +1048,8 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
         ) : null}
 
         {orphanTools.length > 0 ? (
-          <div className="kakao-orphan">
-            <div className="kakao-orphan-label">사용자 메시지 이전에 수집된 도구</div>
+          <div className="chat-orphan">
+            <div className="chat-orphan-label">사용자 메시지 이전에 수집된 도구</div>
             <ToolList
               tools={orphanTools}
               align="left"
@@ -1074,20 +1073,20 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
           // 차단이 이 턴 안에서 발생한 경우에만 응답 숨김 (이후 정상 턴은 그대로 표시)
           const suppressAssistant = blockedTurnIds.has(turn.id) && turn.assistantChunks.length > 0;
           return (
-            <div key={turn.id} className="kakao-turn">
-              <time className="kakao-time" dateTime={new Date(turn.at).toISOString()}>
+            <div key={turn.id} className="chat-turn">
+              <time className="chat-time" dateTime={new Date(turn.at).toISOString()}>
                 {new Date(turn.at).toLocaleTimeString()}
               </time>
-              <div className="kakao-row-user">
-                <div className="kakao-user-stack">
-                  {turn.userMeta ? <div className="kakao-user-meta">{turn.userMeta}</div> : null}
-                  <div className="kakao-bubble-user">{turn.userText}</div>
+              <div className="chat-row-user">
+                <div className="chat-user-stack">
+                  {turn.userMeta ? <div className="chat-user-meta">{turn.userMeta}</div> : null}
+                  <div className="chat-bubble-user">{turn.userText}</div>
                 </div>
               </div>
-              <div className="kakao-tools-block">
+              <div className="chat-tools-block">
                 {turn.tools.length > 0 ? (
                   <>
-                    <div className="kakao-tools-caption">이 메시지 이후 호출된 도구</div>
+                    <div className="chat-tools-caption">이 메시지 이후 호출된 도구</div>
                     <ToolList
                       tools={turn.tools}
                       align="right"
@@ -1096,13 +1095,18 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
                     />
                   </>
                 ) : (
-                  <div className="kakao-tools-none">연결된 도구 호출 기록 없음</div>
+                  <div className="chat-tools-none">연결된 도구 호출 기록 없음</div>
                 )}
               </div>
               {turn.assistantChunks.length > 0 && !suppressAssistant ? (
-                <div className="kakao-row-assistant kakao-row-assistant-after-tools">
-                  <img src={publicAsset("chito.png")} alt="chito" className="kakao-msg-avatar" />
-                  <div className="kakao-bubble-assistant kakao-bubble-md">
+                <div className="chat-row-assistant chat-row-assistant-after-tools">
+                  <img
+                    src={publicAsset("photo/sgclaw2.png")}
+                    alt="sgclaw"
+                    className="chat-msg-avatar"
+                    style={{ width: 40, height: 40, background: "transparent", boxShadow: "none", padding: 0 }}
+                  />
+                  <div className="chat-bubble-assistant chat-bubble-md">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
                       {turn.assistantChunks.join("\n\n")}
                     </ReactMarkdown>
@@ -1251,42 +1255,42 @@ function ToolList(props: {
   openToolId: string | null;
   setOpenToolId: (id: string | null) => void;
 }) {
-  const cls = props.align === "right" ? "kakao-tool-list kakao-tool-list-right" : "kakao-tool-list";
+  const cls = props.align === "right" ? "chat-tool-list chat-tool-list-right" : "chat-tool-list";
   return (
     <ul className={cls}>
       {props.tools.map((t) => {
         const open = props.openToolId === t.id;
         const expandable = Boolean(t.argsFull?.trim() || t.outputFull?.trim());
         return (
-          <li key={t.id} className="kakao-tool-item">
+          <li key={t.id} className="chat-tool-item">
             <button
               type="button"
-              className={`kakao-tool-pill ${open ? "kakao-tool-pill-open" : ""}`}
+              className={`chat-tool-pill ${open ? "chat-tool-pill-open" : ""}`}
               onClick={() => props.setOpenToolId(open ? null : t.id)}
               disabled={!expandable}
             >
-              <span className="kakao-tool-pill-main">
-                <span className="kakao-tool-pill-name">{t.name}</span>
-                {t.meta ? <span className="kakao-tool-pill-meta"> · {t.meta}</span> : null}
+              <span className="chat-tool-pill-main">
+                <span className="chat-tool-pill-name">{t.name}</span>
+                {t.meta ? <span className="chat-tool-pill-meta"> · {t.meta}</span> : null}
               </span>
               {expandable ? (
-                <span className="kakao-tool-pill-chev" aria-hidden>
+                <span className="chat-tool-pill-chev" aria-hidden>
                   {open ? "▲" : "▼"}
                 </span>
               ) : null}
             </button>
             {open && expandable ? (
-              <div className="kakao-tool-detail">
+              <div className="chat-tool-detail">
                 {t.argsFull?.trim() ? (
-                  <div className="kakao-tool-detail-block">
-                    <div className="kakao-tool-detail-label">입력 / 인자</div>
-                    <pre className="kakao-tool-args">{t.argsFull}</pre>
+                  <div className="chat-tool-detail-block">
+                    <div className="chat-tool-detail-label">입력 / 인자</div>
+                    <pre className="chat-tool-args">{t.argsFull}</pre>
                   </div>
                 ) : null}
                 {t.outputFull?.trim() ? (
-                  <div className="kakao-tool-detail-block">
-                    <div className="kakao-tool-detail-label">출력 (Tool output)</div>
-                    <pre className="kakao-tool-args kakao-tool-args-output">{t.outputFull}</pre>
+                  <div className="chat-tool-detail-block">
+                    <div className="chat-tool-detail-label">출력 (Tool output)</div>
+                    <pre className="chat-tool-args chat-tool-args-output">{t.outputFull}</pre>
                   </div>
                 ) : null}
               </div>

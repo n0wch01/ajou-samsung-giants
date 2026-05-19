@@ -118,7 +118,12 @@ export function App() {
         <div className="app-header-inner">
           <div className="app-header-title-tabs">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <img src={publicAsset("chito.png")} alt="chito" className="kakao-room-avatar" style={{ width: 34, height: 34 }} />
+              <img
+                src={publicAsset("photo/sgclaw2.png")}
+                alt="치토클로"
+                className="chat-room-avatar"
+                style={{ width: 44, height: 44, background: "transparent", boxShadow: "none" }}
+              />
               <h1 className="app-header-title">SG-AgentSentinel</h1>
             </div>
             <nav className="app-tabs" role="tablist" aria-label="주요 영역">
