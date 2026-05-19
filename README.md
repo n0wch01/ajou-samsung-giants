@@ -117,7 +117,7 @@ flowchart LR
   ING -->|append-only| TRACE[scripts/sentinel/data/trace.jsonl]
   ING -->|real-time detect| FIND[scripts/sentinel/data/findings-realtime.jsonl]
   FIND -->|SSE/폴링| U
-  U -->|scenario trigger (HTTP)| RUN[scripts/runner/send_scenario.py]
+  U -->|HTTP scenario trigger| RUN[scripts/runner/send_scenario.py]
   RUN -->|chat.send / sessions.reset| GW
 ```
 
