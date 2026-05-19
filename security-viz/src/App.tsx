@@ -117,12 +117,11 @@ export function App() {
       <header className="app-header">
         <div className="app-header-inner">
           <div className="app-header-title-tabs">
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="app-header-brand">
               <img
                 src={publicAsset("photo/sgclaw2.png")}
                 alt="치토클로"
-                className="chat-room-avatar"
-                style={{ width: 44, height: 44, background: "transparent", boxShadow: "none" }}
+                className="chat-room-avatar chat-room-avatar--plain chat-room-avatar--brand"
               />
               <h1 className="app-header-title">SG-AgentSentinel</h1>
             </div>

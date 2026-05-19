@@ -1020,7 +1020,11 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
       <div className="chat-room-scroll" ref={scrollRef}>
         {empty ? (
           <div className="chat-empty-state chat-empty-state-inline">
-            <img src={publicAsset("photo/chitoclaw4.png")} alt="chito and openclaw" className="chat-empty-illust" style={{ width: 200, height: 200 }} />
+            <img
+              src={publicAsset("photo/chitoclaw4.png")}
+              alt="chito and openclaw"
+              className="chat-empty-illust chat-empty-illust--xl"
+            />
             <h3 className="chat-empty-title">No session activity yet</h3>
             <p className="chat-empty-desc">
               테스트 프롬프트를 입력하면 Agent 응답과<br />보안 이벤트가 이곳에 실시간으로 표시됩니다.
@@ -1103,8 +1107,7 @@ export function MessageToolFlow(props: MessageToolFlowProps) {
                   <img
                     src={publicAsset("photo/sgclaw2.png")}
                     alt="sgclaw"
-                    className="chat-msg-avatar"
-                    style={{ width: 40, height: 40, background: "transparent", boxShadow: "none", padding: 0 }}
+                    className="chat-msg-avatar chat-msg-avatar--plain chat-msg-avatar--md"
                   />
                   <div className="chat-bubble-assistant chat-bubble-md">
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
