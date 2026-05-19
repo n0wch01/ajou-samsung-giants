@@ -91,9 +91,10 @@ if str(SCRIPTS_DIR) not in sys.path:
 from openclaw_ws import GwSession, parse_scopes_env, wall_time_ms  # noqa: E402
 
 # 실시간 자동 차단(rate_limit/loop_detect) wiring 용
-from sentinel.detect import RealTimeRateDetector, _load_yaml_rules  # noqa: E402
+from sentinel.detect import RealTimeCombinedDetector, RealTimeRateDetector, _load_yaml_rules  # noqa: E402
 
 _SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+_REALTIME_FINDINGS_FILENAME = "findings-realtime.jsonl"
 
 
 def _default_rules_dir_path() -> Path:
@@ -101,12 +102,13 @@ def _default_rules_dir_path() -> Path:
 
 
 def _ingest_gateway_scopes() -> list[str]:
-    """subscribe / tools.* RPCs need operator.read; merge if env omitted it."""
-    scopes = parse_scopes_env(
-        os.environ.get("OPENCLAW_GATEWAY_SCOPES"), ["operator.read"]
-    )
+    """subscribe / tools.* RPCs need operator.read; sessions.abort needs operator.write."""
+    default = ["operator.read"]
+    if _truthy("SENTINEL_AUTO_ABORT"):
+        default = ["operator.read", "operator.write"]
+    scopes = parse_scopes_env(os.environ.get("OPENCLAW_GATEWAY_SCOPES"), default)
     if "operator.read" not in scopes:
-        return ["operator.read", *scopes]
+        scopes = ["operator.read", *scopes]
     return scopes
 
 
@@ -140,13 +142,34 @@ def _normalize_gateway_event(frame: dict[str, Any]) -> dict[str, Any]:
             v = payload.get(key)
             if isinstance(v, str):
                 summary[key] = v
+        # agent stream events store tool info in payload.data
+        data = payload.get("data")
+        if isinstance(data, dict):
+            for key in ("name", "tool", "toolName", "phase", "state"):
+                if key not in summary:
+                    v = data.get(key)
+                    if isinstance(v, str):
+                        summary[key] = v
         text = payload.get("text") or payload.get("content") or payload.get("message")
         if isinstance(text, str):
             summary["text_preview"] = text[:400]
     if "approval" in event.lower():
         summary["kind"] = "approval"
     elif event == "session.tool" or event.startswith("session.tool."):
-        summary["kind"] = "session.tool"
+        # phase=update/result은 같은 호출의 중복 이벤트이므로 start(또는 미지정)만 카운트
+        _phase = summary.get("phase") or ""
+        if not _phase or _phase == "start":
+            summary["kind"] = "session.tool"
+        else:
+            summary["kind"] = "other"
+    elif event == "agent":
+        # OpenClaw sends tool calls as agent stream events (stream="tool", phase="start")
+        _payload = payload if isinstance(payload, dict) else {}
+        _data = _payload.get("data") if isinstance(_payload.get("data"), dict) else {}
+        if _payload.get("stream") == "tool" and _data.get("phase") == "start":
+            summary["kind"] = "session.tool"
+        else:
+            summary["kind"] = "other"
     elif event == "session.message":
         summary["kind"] = "session.message"
     elif event == "chat" or event.startswith("chat."):
@@ -199,7 +222,7 @@ async def _run_ingest_once(
     max_mb: float,
     snapshot_tools: bool,
     device_identity_path: str | None = None,
-    detector: RealTimeRateDetector | None = None,
+    detector: RealTimeCombinedDetector | None = None,
     auto_abort_min_rank: int = 3,
     abort_state: dict[str, Any] | None = None,
 ) -> None:
@@ -230,29 +253,6 @@ async def _run_ingest_once(
             default=0,
         )
         if worst_rank < auto_abort_min_rank:
-            return
-        # Guardrail toggle: 플래그 파일이 존재하면 abort 스킵 (Direct 모드 시연).
-        # viz가 /api/sentinel/s3-guardrail POST로 토글한다.
-        guardrail_flag = trace_path.parent / "s3-guardrail-disabled.flag"
-        if guardrail_flag.exists():
-            abort_state["fired"] = True  # 더 이상 시도 안 하도록
-            triggered_by = [
-                {"ruleId": f.get("ruleId"), "severity": f.get("severity")}
-                for f in findings
-            ]
-            print(
-                f"[sentinel-ingest] AUTO-ABORT SKIPPED: guardrail disabled (flag={guardrail_flag.name}) "
-                f"— would have aborted by {len(findings)} finding(s)",
-                file=sys.stderr,
-            )
-            append_line({
-                "trace_version": 1,
-                "ts_ms": wall_time_ms(),
-                "entry_type": "meta",
-                "session_key": session_key,
-                "message": "auto-abort skipped: guardrail disabled (Direct 모드)",
-                "auto_abort": {"phase": "skipped", "reason": "guardrail_disabled", "findings": triggered_by},
-            })
             return
         abort_state["fired"] = True
         triggered_by = [
@@ -310,6 +310,19 @@ async def _run_ingest_once(
             print(f"[sentinel-ingest] AUTO-ABORT exception: {e}", file=sys.stderr)
 
     async def on_event(msg: dict[str, Any]) -> None:
+        # 새 에이전트 실행(lifecycle phase=start)이 시작되면 abort 상태·detector 카운터 리셋
+        _pl = msg.get("payload") if isinstance(msg, dict) else {}
+        _data = _pl.get("data") if isinstance(_pl, dict) else {}
+        if (
+            msg.get("event") == "agent"
+            and isinstance(_pl, dict) and _pl.get("stream") == "lifecycle"
+            and isinstance(_data, dict) and _data.get("phase") == "start"
+        ):
+            if abort_state is not None:
+                abort_state["fired"] = False
+            if detector is not None:
+                detector.reset()
+
         rec = _trace_record(
             entry_type="gateway_event",
             frame=msg,
@@ -340,7 +353,11 @@ async def _run_ingest_once(
                     "message": "realtime finding",
                     "finding": f,
                 })
-            asyncio.create_task(_maybe_auto_abort(findings))
+                with open(realtime_path, "a", encoding="utf-8") as _rf:
+                    _rf.write(json.dumps(f, ensure_ascii=False) + "\n")
+            # create_task 대신 await: 툴 호출 감지 즉시 abort RPC를 보내
+            # 다음 이벤트(툴 결과/에이전트 응답)가 오기 전에 세션을 끊는다.
+            await _maybe_auto_abort(findings)
 
     session.on_event(on_event)
 
@@ -461,16 +478,17 @@ async def _run_ingest(
 
     # 실시간 detector + abort 상태는 reconnect를 가로질러 보존되어야 한다
     # (재연결 때마다 슬라이딩 윈도우/연속 카운터를 리셋하면 abort가 영원히 안 뜸).
-    detector: RealTimeRateDetector | None = None
+    detector: RealTimeCombinedDetector | None = None
     abort_state: dict[str, Any] = {"fired": False}
     auto_abort_min_rank = _SEVERITY_RANK.get(auto_abort_min_sev, 3)
     if auto_abort:
         rules_path = rules_dir or _default_rules_dir_path()
         rules = _load_yaml_rules(rules_path)
-        detector = RealTimeRateDetector(rules)
+        detector = RealTimeCombinedDetector(rules)
         meta_line(
             f"auto-abort enabled (min_sev={auto_abort_min_sev}, rules_dir={rules_path}, "
-            f"rate_rules={len(detector._rate)}, loop_rules={len(detector._loop)})"
+            f"rate_rules={len(detector._rate._rate)}, loop_rules={len(detector._rate._loop)}, "
+            f"pattern_rules={len(detector._pattern._rules)})"
         )
 
     attempt = 0

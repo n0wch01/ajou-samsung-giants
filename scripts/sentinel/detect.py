@@ -15,7 +15,6 @@ import json
 import os
 import re
 import sys
-import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -130,9 +129,10 @@ def _finding(
     title: str,
     message: str,
     recommended_action: str,
+    id_suffix: str = "",
 ) -> dict[str, Any]:
     return {
-        "id": f"{rule_id}-{uuid.uuid4()}",
+        "id": f"{rule_id}{(':' + id_suffix) if id_suffix else ''}",
         "ruleId": rule_id,
         "severity": severity,
         "title": title,
@@ -238,6 +238,7 @@ def _eval_rule(
                         recommended_action=rec_default,
                     )
                 )
+                break  # 룰당 1개만 발화
         return out
 
     if mtype == "event_sequence":
@@ -297,6 +298,9 @@ def _eval_rule(
         # 슬라이딩 윈도우 내 동일 도구 호출 횟수가 임계를 넘으면 finding.
         window_s = float(match.get("window_seconds") or 30)
         max_calls = int(match.get("max_calls") or 10)
+        # max_calls == 0 → 무제한 (탐지 비활성)
+        if max_calls <= 0:
+            return out
         target_tools = match.get("tools") or None
         by_tool: dict[str, list[float]] = defaultdict(list)
         for row in trace:
@@ -409,13 +413,13 @@ def _eval_rule(
             return out
         added = [n for n in names if n not in baseline_names]
         matched = [n for n in added if cre.search(n)]
-        for n in matched:
+        if matched:
             out.append(
                 _finding(
                     rule_id=rid,
                     severity=sev,
                     title=title,
-                    message=str(rule.get("message") or f"New tool vs baseline: {n}"),
+                    message=str(rule.get("message") or f"New tools vs baseline: {', '.join(matched)}"),
                     recommended_action=rec_default,
                 )
             )
@@ -428,15 +432,13 @@ class RealTimeRateDetector:
     """
     Live event-stream detector for ingest callbacks.
 
-    rate_limit / loop_detect 규칙만 처리한다. 배치 detect와 결과 형태는 동일하지만,
-    이벤트가 들어오는 즉시 finding을 반환해 respond 단의 sessions.abort 경로가
-    배치 주기를 기다리지 않게 해준다. 러너 wiring은 별도 PR에서 진행한다.
+    rate_limit / loop_detect 규칙을 처리한다.
 
     사용:
         rules = _load_yaml_rules(rules_dir)
         det = RealTimeRateDetector(rules)
-        for entry in stream:                 # entry == ingest._trace_record(...)
-            findings = det.process(entry)    # 임계 도달 시 비어 있지 않음
+        for entry in stream:
+            findings = det.process(entry)
     """
 
     def __init__(self, rules: list[dict[str, Any]]):
@@ -453,6 +455,10 @@ class RealTimeRateDetector:
                 self._loop.append(r)
         self._call_times: dict[tuple[str, str], list[float]] = defaultdict(list)
         self._consecutive: dict[tuple[str, str], list[str]] = defaultdict(list)
+
+    def reset(self) -> None:
+        self._call_times.clear()
+        self._consecutive.clear()
 
     def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
         if entry.get("entry_type") != "gateway_event":
@@ -472,6 +478,9 @@ class RealTimeRateDetector:
                 continue
             window_s = float(m.get("window_seconds") or 30)
             max_calls = int(m.get("max_calls") or 10)
+            # max_calls == 0 → 무제한 (rate-limit 비활성)
+            if max_calls <= 0:
+                continue
             key = (str(rule.get("id") or rule.get("_source") or ""), tool)
             calls = self._call_times[key]
             calls.append(now)
@@ -490,6 +499,7 @@ class RealTimeRateDetector:
                             or f"{tool} called {len(calls)} times within {window_s:.0f}s window (limit {max_calls})"
                         ),
                         recommended_action=str(rule.get("recommendedAction") or ""),
+                        id_suffix=tool,
                     )
                 )
 
@@ -519,14 +529,84 @@ class RealTimeRateDetector:
                             or f"{tool} called {len(seq)} times consecutively with identical args"
                         ),
                         recommended_action=str(rule.get("recommendedAction") or ""),
+                        id_suffix=tool,
                     )
                 )
 
         return out
 
+
+class RealTimePatternDetector:
+    """
+    S1/S2 실시간 탐지: event_payload_regex 타입 규칙을 session.tool 이벤트에 적용.
+
+    패턴이 일치하는 순간 즉시 finding을 반환 → ingest.py가 sessions.abort를 호출.
+    """
+
+    def __init__(self, rules: list[dict[str, Any]]):
+        self._rules: list[dict[str, Any]] = []
+        for r in rules:
+            m = r.get("match")
+            if not isinstance(m, dict):
+                continue
+            if m.get("type") == "event_payload_regex":
+                self._rules.append(r)
+        self._fired: set[str] = set()
+
     def reset(self) -> None:
-        self._call_times.clear()
-        self._consecutive.clear()
+        self._fired.clear()
+
+    def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        if entry.get("entry_type") != "gateway_event":
+            return []
+        norm = entry.get("normalized")
+        if not isinstance(norm, dict) or norm.get("kind") != "session.tool":
+            return []
+        rec_text = json.dumps(entry, ensure_ascii=False)
+        out: list[dict[str, Any]] = []
+        for rule in self._rules:
+            rid = str(rule.get("id") or "")
+            if rid in self._fired:
+                continue
+            m = rule.get("match") or {}
+            target_event = m.get("event")
+            if target_event and target_event != "session.tool":
+                continue
+            pat = str(m.get("pattern") or "")
+            if not pat:
+                continue
+            try:
+                if re.search(pat, rec_text, re.IGNORECASE):
+                    self._fired.add(rid)
+                    out.append(
+                        _finding(
+                            rule_id=rid,
+                            severity=str(rule.get("severity") or "high"),
+                            title=str(rule.get("title") or rid),
+                            message=str(rule.get("message") or ""),
+                            recommended_action=str(rule.get("recommendedAction") or ""),
+                        )
+                    )
+            except re.error:
+                continue
+        return out
+
+
+class RealTimeCombinedDetector:
+    """RealTimeRateDetector + RealTimePatternDetector를 하나의 인터페이스로 묶음."""
+
+    def __init__(self, rules: list[dict[str, Any]]):
+        self._rate = RealTimeRateDetector(rules)
+        self._pattern = RealTimePatternDetector(rules)
+
+    def reset(self) -> None:
+        self._rate.reset()
+        self._pattern.reset()
+
+    def process(self, entry: dict[str, Any]) -> list[dict[str, Any]]:
+        out = self._rate.process(entry)
+        out.extend(self._pattern.process(entry))
+        return out
 
 
 def run_detect(

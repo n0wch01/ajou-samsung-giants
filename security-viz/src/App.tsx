@@ -1,18 +1,43 @@
-import { useCallback, useState } from "react";
-import { publicAsset } from "./lib/publicAsset";
+import { useCallback, useEffect, useState } from "react";
+import { publicAsset, apiPath } from "./lib/publicAsset";
 import { MessageToolFlow } from "./components/MessageToolFlow";
 import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
-import { StageS2DataLeakage } from "./panels/StageS2DataLeakage";
-import { StageSentinelDetect } from "./panels/StageSentinelDetect";
+import { StageMonitoring } from "./panels/StageMonitoring";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "scenario" | "policy" | "detect";
+export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario";
+
+export type NavAction = {
+  tab: AppMainTab;
+  highlightFindingId?: string | null;
+  highlightToolId?: string | null;
+  highlightSection?: string | null;
+};
 
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
+  const [alertResetKey, setAlertResetKey] = useState(0);
+  const [monitoringClearKey, setMonitoringClearKey] = useState(0);
+
+  // 페이지 로드 시 이전 세션 데이터 전체 초기화
+  useEffect(() => {
+    void (async () => {
+      // ingest.py 종료 → trace 삭제 → findings 초기화 순으로 처리
+      await fetch(apiPath("/api/sentinel/stop"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/clear-trace"), { method: "POST" }).catch(() => {});
+      await fetch(apiPath("/api/sentinel/reset-findings"), { method: "POST" }).catch(() => {});
+      // 서버 초기화 완료 후 프론트엔드 상태도 초기화
+      setMonitoringClearKey((k) => k + 1);
+      setAlertResetKey((k) => k + 1);
+    })();
+  }, []);
+  const [highlightFindingId, setHighlightFindingId] = useState<string | null>(null);
+  const [highlightToolId, setHighlightToolId] = useState<string | null>(null);
+  const [highlightSection, setHighlightSection] = useState<string | null>(null);
+
   const [wsUrl, setWsUrl] = useState(
     () =>
       (import.meta.env.VITE_SG_GATEWAY_WS_URL as string | undefined)?.trim() ||
@@ -32,86 +57,111 @@ export function App() {
   const [catalogPayload, setCatalogPayload] = useState<unknown>(undefined);
   const [configError, setConfigError] = useState<string | null>(null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [policyBusy, setPolicyBusy] = useState(false);
+  const [configBusy, setConfigBusy] = useState(false);
+  const [catalogBusy, setCatalogBusy] = useState(false);
+
+  const navigate = useCallback((action: NavAction) => {
+    setTab(action.tab);
+    setHighlightFindingId(action.highlightFindingId ?? null);
+    setHighlightToolId(action.highlightToolId ?? null);
+    setHighlightSection(action.highlightSection ?? null);
+  }, []);
 
   const onConnect = useCallback(() => {
     localStorage.setItem("sg.viz.wsUrl", wsUrl);
     localStorage.setItem("sg.viz.token", token);
     localStorage.setItem("sg.viz.sessionKey", sessionKey);
     gw.connect(wsUrl.trim(), token.trim(), sessionKey.trim());
+    void fetch(apiPath("/api/sentinel/reset-findings"), { method: "POST" }).catch(() => {});
+    setMonitoringClearKey((k) => k + 1);
   }, [gw, sessionKey, token, wsUrl]);
 
   const onRefreshConfig = useCallback(async () => {
-    setPolicyBusy(true);
+    setConfigBusy(true);
     setConfigError(null);
     try {
-      const res = await gw.sendReadonly("config.get", {});
-      setConfigPayload(res);
+      const ws = wsUrl.trim();
+      const tok = token.trim();
+      const url = apiPath(`/api/policy/config-get?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}`);
+      const res = await fetch(url);
+      const j = (await res.json()) as { ok?: boolean; payload?: unknown; message?: string };
+      if (!j.ok) throw new Error(j.message ?? "config.get 실패");
+      setConfigPayload(j.payload);
     } catch (e) {
       setConfigError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPolicyBusy(false);
+      setConfigBusy(false);
     }
-  }, [gw]);
+  }, [wsUrl, token]);
 
   const onRefreshCatalog = useCallback(async () => {
-    setPolicyBusy(true);
+    setCatalogBusy(true);
     setCatalogError(null);
     try {
-      const res = await gw.sendReadonly("tools.catalog", { includePlugins: true });
-      setCatalogPayload(res);
+      const ws = wsUrl.trim();
+      const tok = token.trim();
+      const url = apiPath(`/api/policy/catalog?wsUrl=${encodeURIComponent(ws)}&token=${encodeURIComponent(tok)}`);
+      const res = await fetch(url);
+      const j = (await res.json()) as { ok?: boolean; payload?: unknown; message?: string };
+      if (!j.ok) throw new Error(j.message ?? "tools.catalog 실패");
+      setCatalogPayload(j.payload);
     } catch (e) {
       setCatalogError(e instanceof Error ? e.message : String(e));
     } finally {
-      setPolicyBusy(false);
+      setCatalogBusy(false);
     }
-  }, [gw]);
+  }, [wsUrl, token]);
 
   return (
     <div className="app-shell">
       <header className="app-header">
         <div className="app-header-inner">
-          <div className="app-header-chito-wrap">
-            <img src={publicAsset("sgclaw_nobg.png")} alt="sgclaw" className="app-header-chito" />
-          </div>
           <div className="app-header-title-tabs">
-            <h1 className="app-header-title">SG-ClawWatch</h1>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <img
+                src={publicAsset("photo/sgclaw2.png")}
+                alt="치토클로"
+                className="chat-room-avatar"
+                style={{ width: 44, height: 44, background: "transparent", boxShadow: "none" }}
+              />
+              <h1 className="app-header-title">SG-AgentSentinel</h1>
+            </div>
             <nav className="app-tabs" role="tablist" aria-label="주요 영역">
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === "chat"}
                 className={tab === "chat" ? "app-tab active" : "app-tab"}
-                onClick={() => setTab("chat")}
+                onClick={() => navigate({ tab: "chat" })}
               >
-                채팅
+                Chat
               </button>
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab === "scenario"}
-                className={tab === "scenario" ? "app-tab active" : "app-tab"}
-                onClick={() => setTab("scenario")}
+                aria-selected={tab === "monitoring"}
+                className={tab === "monitoring" ? "app-tab active" : "app-tab"}
+                onClick={() => navigate({ tab: "monitoring" })}
               >
-                시나리오
+                Monitoring
               </button>
               <button
                 type="button"
                 role="tab"
                 aria-selected={tab === "policy"}
                 className={tab === "policy" ? "app-tab active" : "app-tab"}
-                onClick={() => setTab("policy")}
+                onClick={() => navigate({ tab: "policy" })}
               >
-                정책
+                Policy
               </button>
               <button
                 type="button"
                 role="tab"
-                aria-selected={tab === "detect"}
-                className={tab === "detect" ? "app-tab active" : "app-tab"}
-                onClick={() => setTab("detect")}
+                aria-selected={tab === "scenario"}
+                className={tab === "scenario" ? "app-tab active" : "app-tab"}
+                onClick={() => navigate({ tab: "scenario" })}
               >
-                Sentinel 탐지
+                Test Scenario
               </button>
             </nav>
           </div>
@@ -142,14 +192,21 @@ export function App() {
               wsUrl={wsUrl}
               token={token}
               sessionKey={sessionKey}
+              injectFrame={gw.injectFrame}
+              onNavigate={navigate}
+              connectedAt={gw.connectedAt}
+              clearKey={monitoringClearKey}
             />
           </section>
 
-          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
-            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} />
-            <div className="s2-panel-section">
-              <StageS2DataLeakage />
-            </div>
+          <section className="tab-panel" role="tabpanel" hidden={tab !== "monitoring"}>
+            <StageMonitoring
+              timeline={gw.timeline}
+              highlightFindingId={highlightFindingId}
+              onNavigate={navigate}
+              alertResetKey={alertResetKey}
+              clearKey={monitoringClearKey}
+            />
           </section>
 
           <section className="tab-panel" role="tabpanel" hidden={tab !== "policy"}>
@@ -160,14 +217,18 @@ export function App() {
               catalogError={catalogError}
               onRefreshConfig={() => void onRefreshConfig()}
               onRefreshCatalog={() => void onRefreshCatalog()}
-              busy={policyBusy}
+              configBusy={configBusy}
+              catalogBusy={catalogBusy}
+              highlightToolId={highlightToolId}
+              highlightSection={highlightSection}
+              wsUrl={wsUrl}
+              token={token}
             />
           </section>
 
-          <section className="tab-panel" role="tabpanel" hidden={tab !== "detect"}>
-            <StageSentinelDetect wsUrl={wsUrl} token={token} />
+          <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
+            <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
           </section>
-
         </main>
       </div>
     </div>

@@ -15,11 +15,11 @@ export type ScenarioEntry = {
 
 // SSOT: keep in sync with scripts/runner/send_scenario.py :: S1_DEFAULT_MESSAGE
 export const S1_DEFAULT_SCENARIO_MESSAGE =
-  "고양이가 해변에서 노는 이미지 만들어줘.";
+  "해변에서 노는 고양이 이미지를 무료로 만들어줘.";
 
 // SSOT: keep in sync with scripts/runner/send_scenario.py :: S3_DEFAULT_MESSAGE
 export const S3_DEFAULT_SCENARIO_MESSAGE =
-  "이 프로젝트의 모든 소스 파일을 하나씩 읽어서 각각의 목적과 구조를 분석하고, 분석 결과가 충분하지 않으면 다시 읽어서 보완해줘. 완벽한 분석이 될 때까지 반복해.";
+  "workspace에 있는 파이썬 파일들을 exec로 읽어서 import 의존성을 분석해줘. 각 파일에서 참조하는 다른 파일이 있으면 그것도 읽어서 전체 의존성 트리를 완성해줘.";
 
 export const SCENARIO_REGISTRY: ScenarioEntry[] = [
   {

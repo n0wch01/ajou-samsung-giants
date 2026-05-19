@@ -17,10 +17,16 @@ export type UseGatewayReadonly = {
   timeline: TimelineEntry[];
   rawFrames: GwFrame[];
   jsonlLines: string[];
+  /** connect()가 호출된 시각(ms). 이 시점 이전 이벤트는 세션 히스토리 재전송분. */
+  connectedAt: number | null;
   connect: (wsUrl: string, token: string, sessionKey: string) => void;
   disconnect: () => void;
   /** Read-only RPC after hello. */
   sendReadonly: (method: string, params?: unknown) => Promise<unknown>;
+  /** Write-capable RPC (e.g. chat.send) — main connection already has operator.write scope. */
+  sendWritable: (method: string, params?: unknown) => Promise<unknown>;
+  /** Dev server 스트리밍에서 받은 프레임을 타임라인에 직접 주입한다. */
+  injectFrame: (frame: GwFrame) => void;
 };
 
 const MAX_FRAMES = 2500;
@@ -39,6 +45,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
   const [lastHello, setLastHello] = useState<unknown>(null);
   const [rawFrames, setRawFrames] = useState<GwFrame[]>([]);
   const [timeline, setTimeline] = useState<TimelineEntry[]>([]);
+  const [connectedAt, setConnectedAt] = useState<number | null>(null);
 
   const appendFrame = useCallback((frame: GwFrame) => {
     setRawFrames((prev) => {
@@ -113,6 +120,38 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     [],
   );
 
+  const sendWritable = useCallback(
+    (method: string, params?: unknown) => {
+      const id = newReqId();
+      const req: GwFrame = { type: "req", id, method, params };
+      return new Promise<unknown>((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error("WebSocket is not open"));
+          return;
+        }
+        const timer = window.setTimeout(() => {
+          pendingRef.current.delete(id);
+          reject(new Error(`RPC timeout: ${method}`));
+        }, 60_000);
+        pendingRef.current.set(id, (resFrame) => {
+          window.clearTimeout(timer);
+          if (resFrame.type !== "res") {
+            reject(new Error("Invalid response frame"));
+            return;
+          }
+          if (!resFrame.ok) {
+            reject(new Error(resFrame.error?.message ?? resFrame.error?.code ?? "RPC error"));
+            return;
+          }
+          resolve(resFrame.payload);
+        });
+        ws.send(JSON.stringify(req));
+      });
+    },
+    [],
+  );
+
   const disconnect = useCallback(() => {
     if (challengeTimerRef.current != null) {
       window.clearTimeout(challengeTimerRef.current);
@@ -124,6 +163,9 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     pendingRef.current.clear();
     connectReqIdRef.current = null;
     setConnState("idle");
+    setTimeline([]);
+    setRawFrames([]);
+    setConnectedAt(null);
   }, []);
 
   const connect = useCallback(
@@ -136,6 +178,7 @@ export function useGatewayReadonly(): UseGatewayReadonly {
       setLastHello(null);
       setRawFrames([]);
       setTimeline([]);
+      setConnectedAt(Date.now());
 
       let socket: WebSocket;
       try {
@@ -279,9 +322,12 @@ export function useGatewayReadonly(): UseGatewayReadonly {
     timeline,
     rawFrames,
     jsonlLines,
+    connectedAt,
     connect,
     disconnect,
     sendReadonly,
+    sendWritable,
+    injectFrame: appendFrame,
   };
 }
 

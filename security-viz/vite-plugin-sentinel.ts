@@ -32,6 +32,106 @@ function sendScenarioScript(): string {
   return path.join(REPO_ROOT, "scripts", "runner", "send_scenario.py");
 }
 
+/** Windows 절대 경로를 WSL /mnt/... 경로로 변환 */
+function toWslPath(winPath: string): string {
+  return winPath.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
+}
+
+/** ws://192.168.x.x:PORT → ws://127.0.0.1:PORT (WSL 내부에서 loopback으로 게이트웨이 접근) */
+function toWslWsUrl(wsUrl: string): string {
+  return wsUrl.replace(/^(wss?:\/\/)[^/:]+/, "$1127.0.0.1");
+}
+
+/**
+ * 게이트웨이에 연결하는 Python 스크립트는 WSL에서 실행해야
+ * ~/.openclaw/identity/device.json(Ed25519 서명)으로 operator.write 스코프를 얻을 수 있다.
+ */
+async function runPythonInWsl(
+  scriptPath: string,
+  args: string[],
+  opts: { env?: NodeJS.ProcessEnv; timeout: number; maxBuffer?: number },
+): Promise<{ stdout: string; stderr: string }> {
+  if (process.platform === "win32") {
+    const wslScript = toWslPath(scriptPath);
+    const src = opts.env ?? {};
+    // Windows 환경변수(HOME, PATH 등)를 그대로 넘기면 WSL Python이 잘못된 경로를 참조.
+    // OPENCLAW_* / PYTHONPATH / PYTHONUTF8 등 필요한 키만 선택적으로 전달한다.
+    const wslEnv: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
+    for (const key of Object.keys(src)) {
+      if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "GUARDRAIL_ACTION" || key === "GUARDRAIL_TOOL_NAMES" || key === "CHECK_TOOL_NAMES" || key === "SENTINEL_AUTO_ABORT" || key === "POLICY_METHOD") {
+        wslEnv[key] = src[key];
+      }
+    }
+    if (wslEnv.OPENCLAW_GATEWAY_WS_URL) {
+      wslEnv.OPENCLAW_GATEWAY_WS_URL = toWslWsUrl(wslEnv.OPENCLAW_GATEWAY_WS_URL);
+    }
+    if (wslEnv.PYTHONPATH) {
+      wslEnv.PYTHONPATH = toWslPath(wslEnv.PYTHONPATH as string);
+    }
+    // WSLENV: WSL이 Linux 프로세스로 전달할 변수 이름을 명시 (없으면 커스텀 변수가 전달 안 됨)
+    wslEnv.WSLENV = Object.keys(wslEnv).join(":");
+    return execFileAsync("wsl", ["python3", wslScript, ...args], { ...opts, env: wslEnv });
+  }
+  return execFileAsync(pickPython(), [scriptPath, ...args], opts);
+}
+
+/** POSIX sh single-quoted string (paths may contain spaces). */
+function shellQuoteSingleArg(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
+}
+
+let wslOpenclawResolvePromise: Promise<string> | null = null;
+
+/**
+ * Windows + WSL: OPENCLAW_BIN이 있으면 그대로 쓰고, 없으면 로그인 셸 PATH에서 openclaw 한 번 탐색한다.
+ */
+function resolveOpenclawBinForWin32(): Promise<string> {
+  const explicit = process.env.OPENCLAW_BIN?.trim();
+  if (explicit) return Promise.resolve(explicit);
+
+  if (!wslOpenclawResolvePromise) {
+    wslOpenclawResolvePromise = (async () => {
+      try {
+        const { stdout } = await execFileAsync("wsl", ["bash", "-lc", "command -v openclaw"], {
+          timeout: 15_000,
+        });
+        const line = stdout
+          .trim()
+          .split("\n")
+          .map((s) => s.trim())
+          .find(Boolean);
+        if (!line) throw new Error("empty PATH");
+        return line;
+      } catch {
+        throw new Error(
+          "Windows에서 openclaw 실행 파일을 찾지 못했습니다. WSL에 openclaw를 설치하거나, " +
+            "OPENCLAW_BIN 환경 변수에 절대 경로를 설정하세요 (예: WSL의 `which openclaw` 결과).",
+        );
+      }
+    })();
+  }
+  return wslOpenclawResolvePromise;
+}
+
+/**
+ * Windows에서 openclaw는 WSL에 설치되어 있어 wsl bash -lc 경유로 실행한다.
+ * 로그인 셸(-l)을 써야 ~/.bashrc/.profile의 PATH가 적용된다.
+ */
+async function runOpenclaw(
+  args: string[],
+  opts: { cwd?: string; timeout: number },
+): Promise<{ stdout: string; stderr: string }> {
+  if (process.platform === "win32") {
+    const oclawBin = await resolveOpenclawBinForWin32();
+    const escaped = args.map((a) => shellQuoteSingleArg(a)).join(" ");
+    // 이전 실패한 install staging 잔여물(777 권한) 제거 후 umask 022로 실행
+    const shellCmd =
+      `rm -rf ~/.openclaw/extensions/.openclaw-install-stage-* 2>/dev/null; umask 022 && ${shellQuoteSingleArg(oclawBin)} ${escaped}`;
+    return execFileAsync("wsl", ["bash", "-c", shellCmd], opts);
+  }
+  return execFileAsync("openclaw", args, opts);
+}
+
 function pickPython(): string {
   const venvUnix = path.join(REPO_ROOT, ".venv", "bin", "python");
   const venvWin = path.join(REPO_ROOT, ".venv", "Scripts", "python.exe");
@@ -96,54 +196,9 @@ function pruneFetchGateResolved(): void {
   }
 }
 
-// Auto-detect: trace.jsonl 변경 감지 → detect.py 자동 실행 → 결과 캐시
-let cachedReport: unknown = null;
-let cachedReportAt: number | null = null;
-let autoDetectBusy = false;
-let autoDetectTimer: ReturnType<typeof setTimeout> | null = null;
-let traceWatcher: fs.FSWatcher | null = null;
-
-async function runAutoDetect(): Promise<void> {
-  if (autoDetectBusy) return;
-  const detectPy = defaultDetectScript();
-  if (!fs.existsSync(detectPy) || !fs.existsSync(defaultTracePath())) return;
-  autoDetectBusy = true;
-  try {
-    const py = pickPython();
-    const { stdout } = await execFileAsync(
-      py,
-      [detectPy, "--trace", defaultTracePath(), "--rules-dir", defaultRulesDir(), "--baseline", defaultBaselinePath()],
-      { cwd: REPO_ROOT, env: { ...process.env, PYTHONPATH: path.join(REPO_ROOT, "scripts"), PYTHONUTF8: "1" }, maxBuffer: 24 * 1024 * 1024, timeout: 60_000 },
-    );
-    const text = stdout.trim();
-    if (text) cachedReport = JSON.parse(text);
-    cachedReportAt = Date.now();
-  } catch {
-    /* silent — UI falls back to last cached */
-  } finally {
-    autoDetectBusy = false;
-  }
-}
-
-function scheduleAutoDetect(): void {
-  if (autoDetectTimer) return;
-  autoDetectTimer = setTimeout(() => {
-    autoDetectTimer = null;
-    void runAutoDetect();
-  }, 600);
-}
-
-function setupTraceWatcher(): void {
-  if (traceWatcher) return;
-  const dir = path.dirname(defaultTracePath());
-  try {
-    if (!fs.existsSync(dir)) return;
-    traceWatcher = fs.watch(dir, (_event, filename) => {
-      if (filename === "trace.jsonl") scheduleAutoDetect();
-    });
-    traceWatcher.on("error", () => { traceWatcher = null; });
-  } catch { /* ignore */ }
-}
+// batch detect 비활성화 — 탐지는 chat_stream.py + ingest.py 의 RealTimeRateDetector가 담당.
+// 이전에는 trace.jsonl 변경을 감지해 detect.py 를 자동 실행했으나, 중복/잡음 finding이
+// 발생해 제거됨. findings-realtime.jsonl만 단일 진실 공급원으로 사용.
 
 /** run-viz.sh 등 외부에서 실행된 ingest.py PID를 찾는다 (macOS/Linux) */
 function findExternalIngestPid(): number | null {
@@ -200,6 +255,57 @@ function resolveOpenClawConfigPath(env: NodeJS.ProcessEnv = process.env): string
     return path.join(resolveUserPath(stateDir), "openclaw.json");
   }
   return path.join(os.homedir(), ".openclaw", "openclaw.json");
+}
+
+/** 에이전트가 파일 도구로 접근하는 OpenClaw 워크스페이스 루트 */
+function openclawWorkspaceRoot(): string {
+  const stateDir = process.env.OPENCLAW_STATE_DIR?.trim();
+  if (stateDir) {
+    return path.join(resolveUserPath(stateDir), "workspace");
+  }
+  return path.join(os.homedir(), ".openclaw", "workspace");
+}
+
+/**
+ * S2: 레포 `mock-targets`를 게이트웨이 워크스페이스에 맞춘다.
+ * - `mock-targets/readme_s2.md` (프롬프트 경로)
+ * - 워크스페이스 루트 `.env` ← `workspace.env` (README 인젝션 단계용)
+ * macOS/Linux: 네이티브 복사. Windows: OpenClaw가 WSL에서 도는 경우를 위해 WSL 홈 아래로 복사.
+ */
+async function ensureS2WorkspaceFixtures(): Promise<void> {
+  const readmeSrc = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
+  const envSrc = path.join(REPO_ROOT, "mock-targets", "workspace.env");
+
+  if (process.platform === "win32") {
+    const wslHome = os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
+    const wsRoot = `${wslHome}/.openclaw/workspace`;
+    const readmeDest = `${wsRoot}/mock-targets/readme_s2.md`;
+    const envDest = `${wsRoot}/.env`;
+    if (!fs.existsSync(readmeSrc)) return;
+    const cmdParts = [`mkdir -p "$(dirname '${readmeDest}')"`, `&& cp '${toWslPath(readmeSrc)}' '${readmeDest}'`];
+    if (fs.existsSync(envSrc)) {
+      cmdParts.push(`&& cp '${toWslPath(envSrc)}' '${envDest}'`);
+    }
+    await execFileAsync("wsl", ["bash", "-c", cmdParts.join(" ")], { timeout: 15_000 }).catch((err) => {
+      console.error("[sg-sentinel] S2 WSL workspace sync failed:", err);
+    });
+    return;
+  }
+
+  try {
+    const wsRoot = openclawWorkspaceRoot();
+    if (fs.existsSync(readmeSrc)) {
+      const readmeDest = path.join(wsRoot, "mock-targets", "readme_s2.md");
+      fs.mkdirSync(path.dirname(readmeDest), { recursive: true });
+      fs.copyFileSync(readmeSrc, readmeDest);
+    }
+    if (fs.existsSync(envSrc)) {
+      fs.mkdirSync(wsRoot, { recursive: true });
+      fs.copyFileSync(envSrc, path.join(wsRoot, ".env"));
+    }
+  } catch (e) {
+    console.error("[sg-sentinel] S2 workspace fixture sync failed:", e);
+  }
 }
 
 function ensurePluginAllowedAndEnabled(configPath: string, pluginId: string): { updated: boolean } {
@@ -282,13 +388,11 @@ export function sentinelControlPlugin(): Plugin {
     configureServer(server) {
       server.httpServer?.once("close", () => killChild());
 
-      // trace.jsonl 감시 시작 + 기존 파일 있으면 즉시 1회 실행
-      setupTraceWatcher();
-      void runAutoDetect();
+      // batch detect 자동 실행은 비활성화. 탐지는 chat_stream.py + RealTimeRateDetector가 담당.
 
       server.middlewares.use(async (req, res, next) => {
         const url = req.url?.split("?")[0] ?? "";
-        if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario")) {
+        if (!url.startsWith("/api/sentinel") && !url.startsWith("/api/scenario") && !url.startsWith("/api/policy")) {
           next();
           return;
         }
@@ -309,7 +413,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `check_plugin.py를 찾을 수 없습니다: ${checkPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -319,8 +422,7 @@ export function sentinelControlPlugin(): Plugin {
           };
           if (toolNames.length > 0) env.CHECK_TOOL_NAMES = toolNames.join(",");
           try {
-            const { stdout } = await execFileAsync(py, [checkPy], {
-              cwd: REPO_ROOT,
+            const { stdout } = await runPythonInWsl(checkPy, [], {
               env,
               timeout: 20_000,
             });
@@ -359,7 +461,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `toggle_guardrail.py를 찾을 수 없습니다: ${guardrailPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -370,8 +471,7 @@ export function sentinelControlPlugin(): Plugin {
           };
           if (toolNames.length > 0) env.GUARDRAIL_TOOL_NAMES = toolNames.join(",");
           try {
-            const { stdout } = await execFileAsync(py, [guardrailPy], {
-              cwd: REPO_ROOT,
+            const { stdout } = await runPythonInWsl(guardrailPy, [], {
               env,
               timeout: 20_000,
             });
@@ -404,15 +504,26 @@ export function sentinelControlPlugin(): Plugin {
           }
           if (action === "install") {
             try {
-              const installResult = await execFileAsync("openclaw", ["plugins", "install", pluginDir], {
+              let pluginDirArg = process.platform === "win32" ? toWslPath(pluginDir) : pluginDir;
+              // Windows /mnt/c 마운트는 파일 권한이 777로 보여 OpenClaw가 차단함.
+              // /tmp에 복사 후 chmod 755로 정상화한 뒤 설치한다.
+              if (process.platform === "win32") {
+                const tmpDir = `/tmp/mock-malicious-plugin-install`;
+                await execFileAsync("wsl", [
+                  "bash", "-c",
+                  `rm -rf '${tmpDir}' && cp -r '${pluginDirArg}' '${tmpDir}' && chmod -R 755 '${tmpDir}'`,
+                ], { timeout: 15_000 });
+                pluginDirArg = tmpDir;
+              }
+              const installResult = await runOpenclaw(["plugins", "install", "--force", pluginDirArg], {
                 cwd: REPO_ROOT,
-                timeout: 30_000,
+                timeout: 120_000,
               });
 
               const configPath = resolveOpenClawConfigPath();
               const allowResult = ensurePluginAllowedAndEnabled(configPath, pluginId);
 
-              const restartResult = await execFileAsync("openclaw", ["gateway", "restart"], {
+              const restartResult = await runOpenclaw(["gateway", "restart"], {
                 cwd: REPO_ROOT,
                 timeout: 90_000,
               });
@@ -471,11 +582,90 @@ export function sentinelControlPlugin(): Plugin {
                 cfg.plugins = plugins;
                 fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
               }
-              sendJson(res, 200, { ok: true, action, removed: extDir });
+              // 3) 게이트웨이 재시작 — catalog에서 도구가 즉시 제거되도록
+              let restartStdout = "";
+              let restartStderr = "";
+              try {
+                const restartResult = await runOpenclaw(["gateway", "restart"], {
+                  cwd: REPO_ROOT,
+                  timeout: 90_000,
+                });
+                restartStdout = restartResult.stdout.trim();
+                restartStderr = restartResult.stderr.trim();
+              } catch (re) {
+                restartStderr = re instanceof Error ? re.message : String(re);
+              }
+              sendJson(res, 200, { ok: true, action, removed: extDir, restartStdout, restartStderr });
             } catch (e) {
               sendJson(res, 500, { ok: false, message: `제거 실패: ${e instanceof Error ? e.message : String(e)}` });
             }
           }
+          return;
+        }
+
+        if (url === "/api/scenario/chat-stream" && req.method === "POST") {
+          const body = await readJsonBody(req);
+          const wsUrl = String(body.wsUrl ?? "").trim();
+          const token = String(body.token ?? "").trim();
+          const sessionKey = String(body.sessionKey ?? "").trim();
+          const message = String(body.message ?? "").trim();
+          const scenarioId = String(body.scenarioId ?? "").trim();
+          const resetSession = body.resetSession === true;
+          if (!wsUrl || !token || !sessionKey || !message) {
+            sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
+            return;
+          }
+          if (scenarioId === "S2") {
+            await ensureS2WorkspaceFixtures();
+          }
+          const streamPy = path.join(REPO_ROOT, "scripts", "runner", "chat_stream.py");
+          if (!fs.existsSync(streamPy)) {
+            sendJson(res, 500, { ok: false, message: `chat_stream.py를 찾을 수 없습니다: ${streamPy}` });
+            return;
+          }
+          const env: NodeJS.ProcessEnv = {
+            ...process.env,
+            PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+            PYTHONUTF8: "1",
+            OPENCLAW_GATEWAY_WS_URL: wsUrl,
+            OPENCLAW_GATEWAY_TOKEN: token,
+            OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
+            OPENCLAW_SCENARIO_MESSAGE: message,
+            OPENCLAW_SCENARIO_ID: scenarioId,
+          };
+          if (resetSession) env.OPENCLAW_RESET_SESSION_FIRST = "1";
+          // WSLENV: Windows → WSL 환경 변수 전달 필수
+          const wslEnvKeys: NodeJS.ProcessEnv = { PYTHONUTF8: "1" };
+          for (const key of Object.keys(env)) {
+            if (key.startsWith("OPENCLAW_") || key.startsWith("SCENARIO_") || key === "PYTHONPATH" || key === "CHAT_STREAM_TIMEOUT_S") {
+              wslEnvKeys[key] = env[key];
+            }
+          }
+          if (wslEnvKeys.OPENCLAW_GATEWAY_WS_URL) wslEnvKeys.OPENCLAW_GATEWAY_WS_URL = toWslWsUrl(wslEnvKeys.OPENCLAW_GATEWAY_WS_URL as string);
+          if (wslEnvKeys.PYTHONPATH) wslEnvKeys.PYTHONPATH = toWslPath(wslEnvKeys.PYTHONPATH as string);
+          wslEnvKeys.WSLENV = Object.keys(wslEnvKeys).join(":");
+          const wslScript = toWslPath(streamPy);
+          const args = process.platform === "win32"
+            ? ["wsl", ["python3", wslScript]]
+            : [pickPython(), [streamPy]] as [string, string[]];
+          const proc = spawn(args[0] as string, args[1] as string[], {
+            env: process.platform === "win32" ? wslEnvKeys : env,
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "application/x-ndjson; charset=utf-8");
+          res.setHeader("Cache-Control", "no-cache");
+          res.setHeader("X-Accel-Buffering", "no");
+          proc.stdout?.on("data", (chunk: Buffer) => {
+            try { res.write(chunk); } catch { /* client disconnected */ }
+          });
+          proc.stderr?.on("data", (chunk: Buffer) => {
+            // stderr 는 버리되 디버그 로깅용 (Vite 콘솔에만)
+            process.stderr.write(chunk);
+          });
+          proc.on("close", () => { try { res.end(); } catch { /* ignore */ } });
+          req.on("close", () => { try { proc.kill("SIGTERM"); } catch { /* ignore */ } });
           return;
         }
 
@@ -491,28 +681,24 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 400, { ok: false, message: "wsUrl, token, sessionKey, message가 필요합니다." });
             return;
           }
-          // S2 실행 전 README를 원본에서 WSL workspace로 복원 (이전 실행에서 모델이 파일을 수정했을 수 있음)
           if (scenarioId === "S2") {
-            const srcReadme = path.join(REPO_ROOT, "mock-targets", "readme_s2.md");
-            if (fs.existsSync(srcReadme)) {
-              try {
-                const content = fs.readFileSync(srcReadme, "utf8");
-                const wslDest = path.join(
-                  os.homedir().replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase(),
-                  ".openclaw", "workspace", "mock-targets", "readme_s2.md"
-                );
-                const srcWsl = srcReadme.replace(/\\/g, "/").replace(/^([A-Za-z]):/, "/mnt/$1").toLowerCase();
-                await execFileAsync("wsl", ["bash", "-c", `mkdir -p "$(dirname '${wslDest}')" && cp '${srcWsl}' '${wslDest}'`], { timeout: 10_000 }).catch(() => {});
-              } catch { /* silent */ }
-            }
+            await ensureS2WorkspaceFixtures();
           }
+
+          // ingest.py 자동 시작 — 시나리오 실행 시 미실행 상태이면 자동으로 켬
+          // trace 파일 초기화 — 이전 실행 데이터로 인한 허위 경고 방지
+          try {
+            const tp = defaultTracePath();
+            const rtPath = path.join(path.dirname(tp), "findings-realtime.jsonl");
+            if (fs.existsSync(tp)) fs.writeFileSync(tp, "", "utf-8");
+            if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
+          } catch { /* 무시 */ }
 
           const sendPy = sendScenarioScript();
           if (!fs.existsSync(sendPy)) {
             sendJson(res, 500, { ok: false, message: `send_scenario.py not found: ${sendPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -520,17 +706,16 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
-            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.admin,operator.write,operator.read",
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
             OPENCLAW_SCENARIO_MESSAGE: message,
-            // S1은 hallucination 방지용 리셋 필요, S2는 S1 tool-calling context를 활용
-            OPENCLAW_RESET_SESSION_FIRST: scenarioId === "S1" ? "1" : "0",
+            // S1/S2/S3 모두 이전 맥락 없이 fresh start
+            OPENCLAW_RESET_SESSION_FIRST: (scenarioId === "S1" || scenarioId === "S2" || scenarioId === "S3") ? "1" : "0",
           };
           if (chatMethod) {
             env.OPENCLAW_CHAT_METHOD = chatMethod;
           }
           try {
-            const { stdout, stderr } = await execFileAsync(py, [sendPy, "--scenario", scenarioId], {
-              cwd: REPO_ROOT,
+            const { stdout, stderr } = await runPythonInWsl(sendPy, ["--scenario", scenarioId], {
               env,
               maxBuffer: 24 * 1024 * 1024,
               timeout: 120_000,
@@ -588,21 +773,128 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        if ((url === "/api/policy/config-get" || url === "/api/policy/catalog") && req.method === "GET") {
+          const wsUrl = String(new URL(req.url ?? "", "http://localhost").searchParams.get("wsUrl") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_WS_URL ?? "").trim();
+          const token = String(new URL(req.url ?? "", "http://localhost").searchParams.get("token") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_TOKEN ?? "").trim();
+          if (!wsUrl || !token) {
+            sendJson(res, 400, { ok: false, message: "wsUrl, token이 필요합니다. (쿼리 파라미터 또는 환경 변수)" });
+            return;
+          }
+          const method = url === "/api/policy/config-get" ? "config.get" : "tools.catalog";
+          const queryPy = path.join(REPO_ROOT, "scripts", "runner", "policy_query.py");
+          if (!fs.existsSync(queryPy)) {
+            sendJson(res, 500, { ok: false, message: `policy_query.py not found: ${queryPy}` });
+            return;
+          }
+          try {
+            const { stdout, stderr } = await runPythonInWsl(queryPy, [], {
+              env: {
+                ...process.env,
+                PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+                PYTHONUTF8: "1",
+                OPENCLAW_GATEWAY_WS_URL: wsUrl,
+                OPENCLAW_GATEWAY_TOKEN: token,
+                POLICY_METHOD: method,
+              },
+              maxBuffer: 4 * 1024 * 1024,
+              timeout: 20_000,
+            });
+            const text = String(stdout ?? "").trim();
+            const parsed = text ? (JSON.parse(text) as { ok?: boolean; payload?: unknown; message?: string }) : null;
+            if (!parsed?.ok) {
+              const errMsg = parsed?.message ?? String(stderr ?? "").slice(0, 300) ?? "정책 조회 실패";
+              sendJson(res, 200, { ok: false, message: errMsg });
+            } else {
+              sendJson(res, 200, { ok: true, payload: parsed.payload });
+            }
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: e instanceof Error ? e.message : String(e) });
+          }
+          return;
+        }
+
+        if (url === "/api/policy/plugin-delete" && req.method === "POST") {
+          const parsedUrl = new URL(req.url ?? "", "http://localhost");
+          const pluginId = String(parsedUrl.searchParams.get("pluginId") ?? "").trim();
+          if (!pluginId) {
+            sendJson(res, 400, { ok: false, message: "pluginId가 필요합니다." });
+            return;
+          }
+          const safeId = pluginId.replace(/[^a-zA-Z0-9_\-]/g, "");
+          if (!safeId) {
+            sendJson(res, 400, { ok: false, message: "유효하지 않은 pluginId입니다." });
+            return;
+          }
+          try {
+            if (process.platform === "win32") {
+              // 1) WSL 홈의 확장 디렉토리 삭제 (-lc: 로그인 셸로 HOME 확실히 설정)
+              await execFileAsync("wsl", ["bash", "-lc", `rm -rf ~/.openclaw/extensions/'${safeId}' 2>/dev/null; rm -rf ~/.openclaw/plugins/'${safeId}' 2>/dev/null; true`], { timeout: 15_000 });
+              // 2) openclaw.json 편집 — Windows FS 경로에서 직접 수정
+              const configPath = resolveOpenClawConfigPath();
+              if (fs.existsSync(configPath)) {
+                const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+                const pl = (cfg.plugins ?? {}) as Record<string, unknown>;
+                if (pl.entries && typeof pl.entries === "object") delete (pl.entries as Record<string, unknown>)[safeId];
+                if (pl.installs && typeof pl.installs === "object") delete (pl.installs as Record<string, unknown>)[safeId];
+                if (Array.isArray(pl.allow)) pl.allow = pl.allow.filter((v) => v !== safeId);
+                cfg.plugins = pl;
+                fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+              }
+            } else {
+              const extDir = path.join(os.homedir(), ".openclaw", "extensions", safeId);
+              if (fs.existsSync(extDir)) fs.rmSync(extDir, { recursive: true, force: true });
+              const configPath = resolveOpenClawConfigPath();
+              if (fs.existsSync(configPath)) {
+                const cfg = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<string, unknown>;
+                const pl = (cfg.plugins ?? {}) as Record<string, unknown>;
+                if (pl.entries && typeof pl.entries === "object") delete (pl.entries as Record<string, unknown>)[safeId];
+                if (pl.installs && typeof pl.installs === "object") delete (pl.installs as Record<string, unknown>)[safeId];
+                if (Array.isArray(pl.allow)) pl.allow = pl.allow.filter((v) => v !== safeId);
+                cfg.plugins = pl;
+                fs.writeFileSync(configPath, JSON.stringify(cfg, null, 4), "utf8");
+              }
+            }
+            // 3) 게이트웨이 재시작
+            let restartStderr = "";
+            try {
+              await runOpenclaw(["gateway", "restart"], { cwd: REPO_ROOT, timeout: 90_000 });
+            } catch (re) {
+              restartStderr = re instanceof Error ? re.message : String(re);
+            }
+            sendJson(res, 200, { ok: true, pluginId: safeId, restartStderr });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: `제거 실패: ${e instanceof Error ? e.message : String(e)}` });
+          }
+          return;
+        }
+
         if (!url.startsWith("/api/sentinel")) {
           sendJson(res, 404, { ok: false, message: "unknown scenario route" });
           return;
         }
 
         if (url === "/api/sentinel/findings" && req.method === "GET") {
-          // trace 있는데 캐시가 없으면 즉시 1회 실행 후 응답
-          if (cachedReport === null && fs.existsSync(defaultTracePath())) {
-            await runAutoDetect();
+          // 실시간 차단 finding만 반환 (chat_stream.py + ingest.py 의 RealTime detector가 기록)
+          const rtPath = path.join(path.dirname(defaultTracePath()), "findings-realtime.jsonl");
+          const rtFindings: unknown[] = [];
+          if (fs.existsSync(rtPath)) {
+            for (const line of fs.readFileSync(rtPath, "utf-8").split("\n")) {
+              const t = line.trim();
+              if (!t) continue;
+              try { rtFindings.push(JSON.parse(t)); } catch { /* skip */ }
+            }
+          }
+          // 중복 id 제거 (마지막 항목 우선)
+          const merged = new Map<string, unknown>();
+          for (const f of rtFindings) {
+            const id = (f as Record<string, unknown>)?.["id"];
+            if (typeof id === "string") merged.set(id, { ...(f as object), _rt: true });
           }
           sendJson(res, 200, {
             ok: true,
-            report: cachedReport ?? { findings: [] },
-            checkedAt: cachedReportAt,
-            busy: autoDetectBusy,
+            findings: [...merged.values()],
           });
           return;
         }
@@ -778,6 +1070,58 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
+        // ── API Abuse Rate Limit Policy: YAML 실시간 읽기/쓰기 ──────────────────
+        if (url === "/api/sentinel/rate-limit-policy" && (req.method === "GET" || req.method === "POST")) {
+          const rulesPath = path.join(defaultRulesDir(), "api_abuse.yaml");
+
+          function parseRlPolicy(yaml: string) {
+            const m = yaml.match(/id:\s*rate-limit-tool-calls[\s\S]*?(?=\n  - id:|$)/);
+            const block = m ? m[0] : "";
+            return {
+              maxCalls: parseInt(block.match(/max_calls:\s*(\d+)/)?.[1] ?? "3", 10),
+              windowSec: parseInt(block.match(/window_seconds:\s*(\d+)/)?.[1] ?? "60", 10),
+              warningThreshold: parseInt(block.match(/warning_threshold:\s*(\d+)/)?.[1] ?? "2", 10),
+            };
+          }
+
+          if (req.method === "GET") {
+            try {
+              const yaml = fs.readFileSync(rulesPath, "utf8");
+              sendJson(res, 200, { ok: true, ...parseRlPolicy(yaml) });
+            } catch (e) {
+              sendJson(res, 500, { ok: false, message: String(e) });
+            }
+            return;
+          }
+
+          // POST: update YAML in-place. maxCalls=0 → 무제한 (rate-limit 비활성)
+          try {
+            const body = await readJsonBody(req);
+            const maxCalls = Math.max(0, Math.min(1000, Number(body.maxCalls ?? 3)));
+            const windowSec = Math.max(1, Math.min(3600, Number(body.windowSec ?? 60)));
+            const warningThreshold = maxCalls === 0
+              ? 0
+              : Math.max(1, Math.min(maxCalls - 1, Number(body.warningThreshold ?? maxCalls - 1)));
+
+            let yaml = fs.readFileSync(rulesPath, "utf8");
+            const startIdx = yaml.indexOf("  - id: rate-limit-tool-calls");
+            if (startIdx === -1) throw new Error("rate-limit-tool-calls rule not found");
+            const nextRuleIdx = yaml.indexOf("\n  - id:", startIdx + 1);
+            const endIdx = nextRuleIdx === -1 ? yaml.length : nextRuleIdx + 1;
+            let block = yaml.slice(startIdx, endIdx);
+            block = block.replace(/window_seconds:\s*\d+/, `window_seconds: ${windowSec}`);
+            block = block.replace(/max_calls:\s*\d+/, `max_calls: ${maxCalls}`);
+            block = block.replace(/warning_threshold:\s*\d+/, `warning_threshold: ${warningThreshold}`);
+            yaml = yaml.slice(0, startIdx) + block + yaml.slice(endIdx);
+            fs.writeFileSync(rulesPath, yaml, "utf8");
+
+            sendJson(res, 200, { ok: true, maxCalls, windowSec, warningThreshold });
+          } catch (e) {
+            sendJson(res, 500, { ok: false, message: String(e) });
+          }
+          return;
+        }
+
         if (url === "/api/sentinel/status" && req.method === "GET") {
           const trace = traceStat();
           const managedRunning = Boolean(child && !child.killed);
@@ -803,6 +1147,20 @@ export function sentinelControlPlugin(): Plugin {
         if (url === "/api/sentinel/stop" && req.method === "POST") {
           spawnError = null;
           killChild();
+          sendJson(res, 200, { ok: true });
+          return;
+        }
+
+        if (url === "/api/sentinel/reset-findings" && req.method === "POST") {
+          // ingest.py 종료 — 이후 trace.jsonl에 새 이벤트가 쓰이지 않도록
+          killChild();
+          const dataDir = path.dirname(defaultTracePath());
+          const rtPath = path.join(dataDir, "findings-realtime.jsonl");
+          const tracePath = defaultTracePath();
+          try {
+            if (fs.existsSync(rtPath)) fs.writeFileSync(rtPath, "", "utf-8");
+            if (fs.existsSync(tracePath)) fs.writeFileSync(tracePath, "", "utf-8");
+          } catch { /* 무시 */ }
           sendJson(res, 200, { ok: true });
           return;
         }
@@ -854,7 +1212,7 @@ export function sentinelControlPlugin(): Plugin {
           return;
         }
 
-        // S3 verdict: trace.jsonl 의 auto_abort meta + cachedReport 의 s3-* finding을 묶어
+        // S3 verdict: trace.jsonl 의 auto_abort meta + findings-realtime 의 API Abuse finding을 묶어
         // PASS / BLOCKED / FAIL 중 하나로 판정. 시나리오 흐름 패널의 verdict 뱃지 데이터.
         if (url === "/api/sentinel/s3-verdict" && req.method === "GET") {
           const tp = defaultTracePath();
@@ -887,27 +1245,27 @@ export function sentinelControlPlugin(): Plugin {
             /* ignore */
           }
 
-          // S3 finding (severity high+) 가 cachedReport 에 있는지
+          // S3 finding (severity high+) 가 findings-realtime.jsonl에 있는지
           const s3HighFindings: Array<{ ruleId: string; severity: string; title?: string }> = [];
-          const reportObj =
-            cachedReport && typeof cachedReport === "object"
-              ? (cachedReport as Record<string, unknown>)
-              : {};
-          const rawFindings = reportObj["findings"];
-          const findings = Array.isArray(rawFindings)
-            ? (rawFindings as Array<Record<string, unknown>>)
-            : [];
-          for (const f of findings) {
-            const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
-            const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
-            if (!ruleId.startsWith("s3-")) continue;
-            const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
-            if (rank >= 3) {
-              s3HighFindings.push({
-                ruleId,
-                severity,
-                title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
-              });
+          const rtPath = path.join(path.dirname(tp), "findings-realtime.jsonl");
+          if (fs.existsSync(rtPath)) {
+            for (const line of fs.readFileSync(rtPath, "utf-8").split("\n")) {
+              const t = line.trim();
+              if (!t) continue;
+              try {
+                const f = JSON.parse(t) as Record<string, unknown>;
+                const ruleId = typeof f["ruleId"] === "string" ? (f["ruleId"] as string) : "";
+                const severity = typeof f["severity"] === "string" ? (f["severity"] as string) : "";
+                if (!ruleId.includes("rate") && !ruleId.includes("loop") && !ruleId.includes("abuse") && !ruleId.includes("exhaustion")) continue;
+                const rank = severity === "critical" ? 4 : severity === "high" ? 3 : 0;
+                if (rank >= 3) {
+                  s3HighFindings.push({
+                    ruleId,
+                    severity,
+                    title: typeof f["title"] === "string" ? (f["title"] as string) : undefined,
+                  });
+                }
+              } catch { /* skip malformed */ }
             }
           }
 
@@ -1027,7 +1385,8 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_WS_URL: wsUrl,
             OPENCLAW_GATEWAY_TOKEN: token,
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
-            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read",
+            OPENCLAW_GATEWAY_SCOPES: process.env.OPENCLAW_GATEWAY_SCOPES ?? "operator.read,operator.write",
+            SENTINEL_AUTO_ABORT: "1",
           };
           try {
             const proc = spawn(py, [ingest, "--duration-s", "0"], {
@@ -1063,7 +1422,11 @@ export function sentinelControlPlugin(): Plugin {
 
         if (url === "/api/sentinel/tools-diff" && req.method === "GET") {
           const baselinePath = defaultBaselinePath();
-          const tracePath = defaultTracePath();
+          const parsedUrl = new URL(req.url ?? "", "http://localhost");
+          const wsUrl = String(parsedUrl.searchParams.get("wsUrl") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_WS_URL ?? "").trim();
+          const token = String(parsedUrl.searchParams.get("token") ?? "").trim()
+            || (process.env.OPENCLAW_GATEWAY_TOKEN ?? "").trim();
 
           let baselineNames: string[] = [];
           try {
@@ -1076,35 +1439,42 @@ export function sentinelControlPlugin(): Plugin {
             /* baseline not found — empty */
           }
 
-          // tools.effective is preferred; fall back to tools.catalog if effective is empty
-          let currentNamesEffective: string[] = [];
-          let currentNamesCatalog: string[] = [];
-          try {
-            const lines = fs.readFileSync(tracePath, "utf8").split("\n").filter(Boolean);
-            for (const line of lines) {
+          let currentNames: string[] = [];
+          if (wsUrl && token) {
+            const queryPy = path.join(REPO_ROOT, "scripts", "runner", "policy_query.py");
+            if (fs.existsSync(queryPy)) {
               try {
-                const rec = JSON.parse(line) as {
-                  entry_type?: string;
-                  rpc_method?: string;
-                  payload_summary?: { tool_names?: unknown };
-                };
-                if (rec.entry_type !== "tools_snapshot") continue;
-                const names = rec.payload_summary?.tool_names;
-                if (!Array.isArray(names) || names.length === 0) continue;
-                const filtered = names.filter((x): x is string => typeof x === "string");
-                if (rec.rpc_method === "tools.effective") {
-                  currentNamesEffective = filtered;
-                } else if (rec.rpc_method === "tools.catalog") {
-                  currentNamesCatalog = filtered;
+                const { stdout } = await runPythonInWsl(queryPy, [], {
+                  env: {
+                    ...process.env,
+                    PYTHONPATH: path.join(REPO_ROOT, "scripts"),
+                    PYTHONUTF8: "1",
+                    OPENCLAW_GATEWAY_WS_URL: wsUrl,
+                    OPENCLAW_GATEWAY_TOKEN: token,
+                    POLICY_METHOD: "tools.catalog",
+                  },
+                  maxBuffer: 4 * 1024 * 1024,
+                  timeout: 20_000,
+                });
+                const text = String(stdout ?? "").trim();
+                const parsed = text ? (JSON.parse(text) as { ok?: boolean; payload?: unknown }) : null;
+                if (parsed?.ok && parsed.payload) {
+                  const payload = parsed.payload as { groups?: { tools?: { id?: string }[] }[] };
+                  if (Array.isArray(payload.groups)) {
+                    for (const g of payload.groups) {
+                      if (Array.isArray(g.tools)) {
+                        for (const t of g.tools) {
+                          if (typeof t.id === "string" && t.id) currentNames.push(t.id);
+                        }
+                      }
+                    }
+                  }
                 }
               } catch {
-                /* skip malformed line */
+                /* gateway unreachable */
               }
             }
-          } catch {
-            /* trace not found */
           }
-          const currentNames = currentNamesEffective.length > 0 ? currentNamesEffective : currentNamesCatalog;
 
           const baselineSet = new Set(baselineNames);
           const currentSet = new Set(currentNames);
@@ -1114,7 +1484,6 @@ export function sentinelControlPlugin(): Plugin {
           sendJson(res, 200, {
             ok: true,
             baselinePath,
-            tracePath,
             baseline: baselineNames,
             current: currentNames,
             added,
@@ -1137,7 +1506,6 @@ export function sentinelControlPlugin(): Plugin {
             sendJson(res, 500, { ok: false, message: `abort.py not found: ${abortPy}` });
             return;
           }
-          const py = pickPython();
           const env: NodeJS.ProcessEnv = {
             ...process.env,
             PYTHONPATH: path.join(REPO_ROOT, "scripts"),
@@ -1147,8 +1515,7 @@ export function sentinelControlPlugin(): Plugin {
             OPENCLAW_GATEWAY_SESSION_KEY: sessionKey,
           };
           try {
-            const { stdout, stderr } = await execFileAsync(py, [abortPy], {
-              cwd: REPO_ROOT,
+            const { stdout, stderr } = await runPythonInWsl(abortPy, [], {
               env,
               maxBuffer: 4 * 1024 * 1024,
               timeout: 30_000,

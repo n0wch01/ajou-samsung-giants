@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SG 데모 올인원 스타터
-#   1. OpenClaw 게이트웨이 시작 또는 재시작 (fetch 인터셉터 반영)
+#   1. OpenClaw 게이트웨이 시작 또는 재시작
 #   2. Sentinel ingest 백그라운드 시작 (OPENCLAW_* 환경변수가 있을 때)
 #   3. security-viz Vite 개발 서버 시작
 set -euo pipefail
@@ -24,11 +24,36 @@ if [[ -x "$ROOT/.venv/bin/python" ]]; then
 fi
 
 PIDS=()
+CLEANED_UP=0
 cleanup() {
+  if [[ "$CLEANED_UP" -eq 1 ]]; then return; fi
+  CLEANED_UP=1
   local p
   for p in "${PIDS[@]:-}"; do
     kill "$p" 2>/dev/null || true
   done
+  echo "" >&2
+
+  local stop_gw=0
+  if [[ -r /dev/tty ]]; then
+    local reply=""
+    printf "[run-viz] OpenClaw 게이트웨이도 함께 종료할까요? [Y/n] " >&2
+    if read -t 10 -r reply </dev/tty; then
+      if [[ -z "$reply" || "$reply" =~ ^[Yy] ]]; then
+        stop_gw=1
+      fi
+    else
+      echo "" >&2
+      echo "[run-viz] 응답 시간 초과 — 게이트웨이를 유지합니다." >&2
+    fi
+  fi
+
+  if [[ "$stop_gw" -eq 1 ]]; then
+    echo "[run-viz] OpenClaw 게이트웨이 종료…" >&2
+    openclaw gateway stop 2>/dev/null || true
+  else
+    echo "[run-viz] OpenClaw 게이트웨이는 유지됩니다." >&2
+  fi
 }
 trap cleanup EXIT INT TERM HUP
 
@@ -36,7 +61,7 @@ trap cleanup EXIT INT TERM HUP
 echo "" >&2
 echo "[run-viz] ── 1. OpenClaw 게이트웨이 ──────────────────────────────" >&2
 if openclaw gateway status 2>/dev/null | grep -q "RPC probe: ok"; then
-  echo "[run-viz] 게이트웨이 실행 중 → 재시작 (fetch 인터셉터 적용)…" >&2
+  echo "[run-viz] 게이트웨이 실행 중 → 재시작…" >&2
   openclaw gateway restart >&2
 else
   echo "[run-viz] 게이트웨이 꺼져 있음 → 시작…" >&2
@@ -45,16 +70,18 @@ fi
 
 # 게이트웨이가 준비될 때까지 대기 (최대 15초)
 echo "[run-viz] 게이트웨이 준비 대기…" >&2
+GATEWAY_READY=0
 for i in $(seq 1 15); do
   if openclaw gateway status 2>/dev/null | grep -q "RPC probe: ok"; then
     echo "[run-viz] 게이트웨이 준비 완료 (${i}s)" >&2
+    GATEWAY_READY=1
     break
   fi
   sleep 1
-  if [[ $i -eq 15 ]]; then
-    echo "[run-viz] 경고: 게이트웨이 준비 확인 실패 — 계속 진행합니다." >&2
-  fi
 done
+if [[ "$GATEWAY_READY" -ne 1 ]]; then
+  echo "[run-viz] 경고: 15초 내 게이트웨이 준비 확인 실패 — 계속 진행합니다." >&2
+fi
 
 # ── 2. Sentinel ingest ───────────────────────────────────────────────────────
 echo "" >&2
@@ -72,7 +99,9 @@ else
 fi
 
 if [[ -n "${OPENCLAW_GATEWAY_WS_URL:-}" && -n "${OPENCLAW_GATEWAY_TOKEN:-}" ]]; then
-  echo "[run-viz] Sentinel ingest 시작 → scripts/sentinel/data/trace.jsonl" >&2
+  : "${SENTINEL_AUTO_ABORT:=1}"
+  export SENTINEL_AUTO_ABORT
+  echo "[run-viz] Sentinel ingest 시작 → scripts/sentinel/data/trace.jsonl (auto-abort=${SENTINEL_AUTO_ABORT})" >&2
   PYTHONPATH="$ROOT/scripts" "$PY" "$ROOT/scripts/sentinel/ingest.py" --duration-s 0 &
   PIDS+=("$!")
 else
@@ -89,7 +118,6 @@ if [[ ! -d node_modules ]]; then
 fi
 
 echo "" >&2
-echo "[run-viz] Ctrl+C 로 Vite + ingest 종료." >&2
 echo "" >&2
 
 npm run dev

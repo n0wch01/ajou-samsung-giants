@@ -460,6 +460,24 @@ class GwSession:
             self._pending.pop(rid, None)
 
 
+async def rpc_sessions_reset(
+    sess: GwSession,
+    session_key: str,
+    *,
+    timeout_s: float = 15.0,
+) -> None:
+    """Call ``sessions.reset`` before ``chat.send``.
+
+    일부 게이트웨이 빌드는 strict 파라미터 스키마라 ``reason`` 같은 추가 키를 거부하거나
+    연결을 끊을 수 있다 (``ingest.py``의 ``sessions.abort`` 주석과 동일 패턴).
+    ``sessions.subscribe`` 와 같이 ``key`` 만 보낸다.
+    """
+    res = await sess.rpc("sessions.reset", {"key": session_key}, timeout_s=timeout_s)
+    if res.get("ok"):
+        return
+    raise RuntimeError(f"sessions.reset not ok: {res.get('error')!r}")
+
+
 def parse_scopes_env(raw: str | None, default: list[str]) -> list[str]:
     if not raw or not raw.strip():
         return default
