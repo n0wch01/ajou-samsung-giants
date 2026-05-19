@@ -19,7 +19,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from openclaw_ws import GwSession  # noqa: E402
+from openclaw_ws import GwSession, MissingGatewayEnvError, load_gateway_env  # noqa: E402
 
 DEFAULT_S1_TOOLS = ["ai_image_gen", "ai_model_check"]
 
@@ -72,17 +72,16 @@ async def _check(ws_url: str, token: str, tool_names: list[str]) -> dict:
 
 
 def main() -> None:
-    ws_url = os.environ.get("OPENCLAW_GATEWAY_WS_URL", "").strip()
-    token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "").strip()
-
-    if not ws_url or not token:
-        print(json.dumps({"ok": False, "message": "OPENCLAW_GATEWAY_WS_URL, OPENCLAW_GATEWAY_TOKEN required"}))
+    try:
+        env = load_gateway_env()
+    except MissingGatewayEnvError as e:
+        print(json.dumps({"ok": False, "message": f"{', '.join(e.missing)} required"}))
         sys.exit(1)
 
     raw = os.environ.get("CHECK_TOOL_NAMES", "").strip()
     tool_names = [t.strip() for t in raw.split(",") if t.strip()] if raw else DEFAULT_S1_TOOLS
 
-    result = asyncio.run(_check(ws_url, token, tool_names))
+    result = asyncio.run(_check(env.ws_url, env.token, tool_names))
     print(json.dumps(result, ensure_ascii=False))
     if not result.get("ok") or not result.get("installed"):
         sys.exit(1)
