@@ -21,7 +21,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from openclaw_ws import GwSession, parse_scopes_env  # noqa: E402
+from openclaw_ws import GwSession, MissingGatewayEnvError, load_gateway_env, parse_scopes_env  # noqa: E402
 
 
 async def _abort(ws_url: str, token: str, session_key: str, scopes: list[str]) -> dict:
@@ -34,17 +34,16 @@ async def _abort(ws_url: str, token: str, session_key: str, scopes: list[str]) -
 
 
 def main() -> None:
-    ws_url = os.environ.get("OPENCLAW_GATEWAY_WS_URL", "").strip()
-    token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "").strip()
-    session_key = os.environ.get("OPENCLAW_GATEWAY_SESSION_KEY", "").strip()
-    if not ws_url or not token or not session_key:
-        raise SystemExit("OPENCLAW_GATEWAY_WS_URL, OPENCLAW_GATEWAY_TOKEN, OPENCLAW_GATEWAY_SESSION_KEY are required.")
+    try:
+        env = load_gateway_env(require_session=True)
+    except MissingGatewayEnvError as e:
+        raise SystemExit(", ".join(e.missing) + " are required.") from None
 
     scopes = parse_scopes_env(
         os.environ.get("OPENCLAW_GATEWAY_SCOPES"),
         ["operator.admin", "operator.write", "operator.read"],
     )
-    res = asyncio.run(_abort(ws_url, token, session_key, scopes))
+    res = asyncio.run(_abort(env.ws_url, env.token, env.session_key, scopes))
     print(json.dumps(res, ensure_ascii=False, indent=2))
     if not res.get("ok"):
         raise SystemExit(1)

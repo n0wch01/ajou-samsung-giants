@@ -484,6 +484,60 @@ def parse_scopes_env(raw: str | None, default: list[str]) -> list[str]:
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 
+@dataclass(frozen=True)
+class GatewayEnv:
+    """게이트웨이 접속 정보(`ws_url`, `token`, optional `session_key`).
+
+    `load_gateway_env`에서 값이 빠지면 `MissingGatewayEnvError`로 raise한다.
+    """
+
+    ws_url: str
+    token: str
+    session_key: str
+
+
+class MissingGatewayEnvError(RuntimeError):
+    """필수 환경변수가 비었거나 누락됐을 때 raise. ``missing`` 속성에 이름 목록을 노출."""
+
+    def __init__(self, missing: list[str]):
+        self.missing = list(missing)
+        super().__init__(
+            "Required environment variables missing: " + ", ".join(missing)
+        )
+
+
+def load_gateway_env(
+    *,
+    require_session: bool = False,
+    ws_url_override: str | None = None,
+    token_override: str | None = None,
+    session_key_override: str | None = None,
+) -> GatewayEnv:
+    """`OPENCLAW_GATEWAY_*` 환경변수를 한 번에 읽고 검증.
+
+    - `require_session=True`이면 `OPENCLAW_GATEWAY_SESSION_KEY`도 필수
+    - `*_override`로 CLI flag 값을 우선시할 수 있음 (argparse에서 받은 값 전달용)
+    - 누락 시 `MissingGatewayEnvError`를 raise한다. 호출 측은 이를 `SystemExit`/`json.dumps` 등
+      각자 컨벤션에 맞게 변환하면 된다.
+    """
+
+    ws_url = (ws_url_override if ws_url_override is not None else os.environ.get("OPENCLAW_GATEWAY_WS_URL", "")).strip()
+    token = (token_override if token_override is not None else os.environ.get("OPENCLAW_GATEWAY_TOKEN", "")).strip()
+    session_key = (session_key_override if session_key_override is not None else os.environ.get("OPENCLAW_GATEWAY_SESSION_KEY", "")).strip()
+
+    missing: list[str] = []
+    if not ws_url:
+        missing.append("OPENCLAW_GATEWAY_WS_URL")
+    if not token:
+        missing.append("OPENCLAW_GATEWAY_TOKEN")
+    if require_session and not session_key:
+        missing.append("OPENCLAW_GATEWAY_SESSION_KEY")
+    if missing:
+        raise MissingGatewayEnvError(missing)
+
+    return GatewayEnv(ws_url=ws_url, token=token, session_key=session_key)
+
+
 def wall_time_ms() -> int:
     """Wall-clock ms for JSONL timestamps (not monotonic)."""
     return int(time.time() * 1000)
