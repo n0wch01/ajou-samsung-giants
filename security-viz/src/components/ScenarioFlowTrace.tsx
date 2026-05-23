@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { TimelineEntry } from "../gateway/normalizeEvent";
-import { extractEmbeddedToolLinesForViz } from "./MessageToolFlow";
+import { extractEmbeddedToolLinesForViz } from "./messageToolFlowData";
 import { apiPath } from "../lib/publicAsset";
 
 type RealtimeFinding = {

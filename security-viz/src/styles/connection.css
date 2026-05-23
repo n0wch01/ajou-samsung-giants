@@ -1,0 +1,409 @@
+/* ── Connection Panel (cp-*) ─────────────────────────────────────────── */
+.cp-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #101c2f;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.cp-header {
+  padding: 24px 20px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.cp-header-title {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.cp-header-sub {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cp-header-desc {
+  font-size: 0.65rem;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.cp-field-hint {
+  font-size: 0.62rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.cp-action-desc {
+  font-size: 0.65rem;
+  color: var(--muted);
+  line-height: 1.4;
+  margin: 0 0 6px;
+}
+
+/* 상태 카드 */
+.cp-status-card {
+  margin: 20px 16px 8px;
+  border-radius: 8px;
+  padding: 18px 20px;
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.02);
+}
+
+.cp-status-card-live {
+  border-color: rgba(16,185,129,0.4);
+  background: rgba(16,185,129,0.06);
+}
+
+.cp-status-card-connecting {
+  border-color: rgba(59,130,246,0.4);
+  background: rgba(59,130,246,0.06);
+}
+
+.cp-status-card-error {
+  border-color: rgba(239,68,68,0.4);
+  background: rgba(239,68,68,0.06);
+}
+
+.cp-status-card-offline {
+  border-color: rgba(239,68,68,0.35);
+  background: rgba(239,68,68,0.05);
+}
+
+.cp-status-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.cp-status-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.cp-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.cp-dot-live       { background: var(--ok);     box-shadow: 0 0 6px rgba(16,185,129,0.7); animation: cp-pulse 2s ease-in-out infinite; }
+.cp-dot-connecting { background: #3b82f6;        animation: cp-pulse 0.8s ease-in-out infinite; }
+.cp-dot-error      { background: var(--danger);  box-shadow: 0 0 6px rgba(239,68,68,0.6); }
+.cp-dot-offline    { background: var(--danger);  box-shadow: 0 0 6px rgba(239,68,68,0.5); }
+
+@keyframes cp-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}
+
+.cp-status-main {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.2;
+}
+
+.cp-status-card-live       .cp-status-main { color: var(--ok); }
+.cp-status-card-error      .cp-status-main { color: var(--danger); }
+.cp-status-card-connecting .cp-status-main { color: #3b82f6; }
+.cp-status-card-offline    .cp-status-main { color: var(--danger); }
+
+.cp-status-sub {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* 섹션 */
+.cp-section {
+  padding: 20px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.cp-section-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+/* 버튼 */
+.cp-btn-row {
+  display: flex;
+  gap: 12px;
+  padding-bottom: 14px;
+}
+
+.cp-btn-connect,
+.cp-btn-disconnect {
+  flex: 1;
+  padding: 8px 0;
+  border-radius: 7px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.cp-btn-connect {
+  background: rgba(59,130,246,0.15);
+  border-color: rgba(59,130,246,0.6);
+  color: #93c5fd;
+}
+
+.cp-btn-connect:hover:not(:disabled) {
+  background: rgba(59,130,246,0.28);
+}
+
+.cp-btn-connect:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cp-btn-disconnect {
+  background: transparent;
+  border-color: rgba(239,68,68,0.4);
+  color: rgba(239,68,68,0.75);
+}
+
+.cp-btn-disconnect:hover:not(:disabled) {
+  background: rgba(239,68,68,0.1);
+  border-color: rgba(239,68,68,0.7);
+  color: var(--danger);
+}
+
+.cp-btn-disconnect:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.cp-error {
+  margin: 0 12px 12px;
+  font-size: 0.78rem;
+  color: var(--danger);
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(239,68,68,0.07);
+  border: 1px solid rgba(239,68,68,0.2);
+}
+
+.panel h2 {
+  margin: 0 0 8px;
+  font-size: 0.95rem;
+}
+
+.panel h3 {
+  margin: 12px 0 6px;
+  font-size: 0.82rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.scenario-s1-playbook {
+  margin: 0 0 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.06);
+  font-size: 0.8rem;
+}
+
+.scenario-s1-playbook > summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.scenario-s1-playbook-list {
+  margin: 10px 0 0;
+  padding-left: 1.25rem;
+  color: var(--text);
+  line-height: 1.55;
+}
+
+.scenario-s1-playbook-list li {
+  margin-bottom: 6px;
+}
+
+.scenario-s1-playbook-list code {
+  font-size: 0.78em;
+}
+
+.scenario-panel .scenario-textarea {
+  width: 100%;
+  min-height: 120px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.scenario-panel .scenario-meta .scenario-doc {
+  display: block;
+  font-size: 0.8rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  margin-top: 4px;
+}
+
+.scenario-actions {
+  flex-wrap: wrap;
+}
+
+.scenario-hint {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--ok);
+}
+
+.scenario-warn {
+  margin: 10px 0 0;
+  font-size: 0.82rem;
+  color: var(--warn);
+}
+
+.scenario-guardrail-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.scenario-guardrail-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+.scenario-guardrail-btns {
+  display: flex;
+  gap: 4px;
+}
+.scenario-guardrail-btn {
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 3px 14px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.scenario-guardrail-btn:disabled { opacity: 0.4; cursor: default; }
+.scenario-guardrail-btn-on:hover:not(:disabled),
+.scenario-guardrail-btn-on.active {
+  background: rgba(16,185,129,0.12);
+  color: var(--ok);
+  border-color: rgba(16,185,129,0.4);
+}
+.scenario-guardrail-btn-off:hover:not(:disabled),
+.scenario-guardrail-btn-off.active {
+  background: rgba(245,158,11,0.12);
+  color: var(--warn);
+  border-color: rgba(245,158,11,0.4);
+}
+.scenario-guardrail-status {
+  font-size: 0.75rem;
+  margin-left: auto;
+}
+.scenario-guardrail-status-on    { color: var(--ok); }
+.scenario-guardrail-status-off   { color: var(--warn); }
+.scenario-guardrail-status-error { color: var(--danger); }
+.scenario-guardrail-status-unknown,
+.scenario-guardrail-status-loading { color: var(--muted); }
+
+.scenario-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.scenario-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  background: #101c2f;
+}
+
+.scenario-card.is-planned {
+  opacity: 0.85;
+}
+
+.scenario-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.scenario-card-id {
+  font-size: 0.95rem;
+}
+
+.scenario-status-pill {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.scenario-status-pill.active {
+  border-color: #1f5c3d;
+  color: var(--ok);
+}
+
+.scenario-status-pill.planned {
+  border-color: #4a4f5c;
+  color: var(--muted);
+}
+
+.scenario-card-title {
+  font-size: 0.88rem;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.scenario-card-path {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--muted);
+  margin-bottom: 10px;
+  word-break: break-all;
+}
+
+.scenario-card-actions {
+  flex-wrap: wrap;
+}
+

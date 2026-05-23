@@ -54,17 +54,32 @@ def _load_trace(path: Path) -> list[dict[str, Any]]:
     return out
 
 
+# mtime + 파일 목록 기반 캐시. 룰 YAML이 바뀌면 자동 무효화.
+_RULE_CACHE: dict[Path, tuple[tuple[tuple[str, float], ...], list[dict[str, Any]]]] = {}
+
+
+def _rules_signature(yaml_files: list[Path]) -> tuple[tuple[str, float], ...]:
+    return tuple((p.name, p.stat().st_mtime) for p in yaml_files)
+
+
 def _load_yaml_rules(rules_dir: Path) -> list[dict[str, Any]]:
-    rules: list[dict[str, Any]] = []
     if not rules_dir.is_dir():
-        return rules
-    for p in sorted(rules_dir.glob("*.yaml")):
+        return []
+    yaml_files = sorted(rules_dir.glob("*.yaml"))
+    sig = _rules_signature(yaml_files)
+    cached = _RULE_CACHE.get(rules_dir)
+    if cached is not None and cached[0] == sig:
+        return [dict(r) for r in cached[1]]
+
+    rules: list[dict[str, Any]] = []
+    for p in yaml_files:
         raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
         for i, r in enumerate(raw.get("rules") or []):
             if isinstance(r, dict):
                 r = dict(r)
                 r["_source"] = f"{p.name}#{i}"
                 rules.append(r)
+    _RULE_CACHE[rules_dir] = (sig, [dict(r) for r in rules])
     return rules
 
 

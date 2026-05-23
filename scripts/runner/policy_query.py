@@ -19,7 +19,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from openclaw_ws import GwSession  # noqa: E402
+from openclaw_ws import GwSession, MissingGatewayEnvError, load_gateway_env  # noqa: E402
 
 
 async def _query(ws_url: str, token: str, method: str) -> dict:
@@ -54,19 +54,18 @@ async def _query(ws_url: str, token: str, method: str) -> dict:
 
 
 def main() -> None:
-    ws_url = os.environ.get("OPENCLAW_GATEWAY_WS_URL", "").strip()
-    token = os.environ.get("OPENCLAW_GATEWAY_TOKEN", "").strip()
-    method = os.environ.get("POLICY_METHOD", "config.get").strip()
-
-    if not ws_url or not token:
-        print(json.dumps({"ok": False, "message": "OPENCLAW_GATEWAY_WS_URL, OPENCLAW_GATEWAY_TOKEN required"}))
+    try:
+        env = load_gateway_env()
+    except MissingGatewayEnvError as e:
+        print(json.dumps({"ok": False, "message": f"{', '.join(e.missing)} required"}))
         sys.exit(1)
 
+    method = os.environ.get("POLICY_METHOD", "config.get").strip()
     if method not in ("config.get", "tools.catalog"):
         print(json.dumps({"ok": False, "message": f"unsupported method: {method}"}))
         sys.exit(1)
 
-    result = asyncio.run(_query(ws_url, token, method))
+    result = asyncio.run(_query(env.ws_url, env.token, method))
     print(json.dumps(result, ensure_ascii=False))
     if not result.get("ok"):
         sys.exit(1)
