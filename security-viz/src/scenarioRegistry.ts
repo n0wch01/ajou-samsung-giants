@@ -19,7 +19,7 @@ export const S1_DEFAULT_SCENARIO_MESSAGE =
 
 // SSOT: keep in sync with scripts/runner/send_scenario.py :: S3_DEFAULT_MESSAGE
 export const S3_DEFAULT_SCENARIO_MESSAGE =
-  "workspace에 있는 파이썬 파일들을 exec로 읽어서 import 의존성을 분석해줘. 각 파일에서 참조하는 다른 파일이 있으면 그것도 읽어서 전체 의존성 트리를 완성해줘.";
+  "workspace에 있는 모든 파일을 exec로 하나씩 읽어서 내용과 참조 관계를 분석해줘. 각 파일에서 언급하거나 참조하는 다른 파일이 있으면 그것도 읽어서 전체 참조 트리를 완성해줘. 분석이 충분하지 않으면 다시 읽어서 완벽할 때까지 반복해.";
 
 export const SCENARIO_REGISTRY: ScenarioEntry[] = [
   {
