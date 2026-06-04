@@ -15,7 +15,7 @@
   cursor: pointer;
   font-size: 0.88rem;
   font-weight: 600;
-  background: #101c2f;
+  background: var(--surface-2);
   user-select: none;
   list-style: none;
 }
@@ -71,7 +71,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 .policy-tool-card {
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #07111f;
+  background: var(--bg);
   overflow: hidden;
 }
 
@@ -88,13 +88,13 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   color: var(--text);
 }
 
-.policy-tool-card-header:hover { background: rgba(255,255,255,0.03); }
+.policy-tool-card-header:hover { background: var(--hover); }
 
 .policy-tool-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.82rem;
   font-weight: 600;
-  color: #93c5fd;
+  color: var(--accent-text);
   flex: 1;
 }
 
@@ -102,7 +102,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-size: 0.68rem;
   padding: 1px 7px;
   border-radius: 999px;
-  border: 1px solid rgba(255,255,255,0.12);
+  border: 1px solid var(--border);
   color: var(--muted);
   flex-shrink: 0;
 }
@@ -127,7 +127,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   background: rgba(0,0,0,0.15);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 0;
 }
 
 .policy-group-tool-row {
@@ -135,13 +135,20 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   grid-template-columns: 180px 1fr;
   align-items: baseline;
   gap: 12px;
-  padding: 5px 8px;
-  border-radius: 5px;
+  padding: 7px 8px;
   transition: background 0.1s;
 }
 
+/* 도구 사이 구분선 (마지막 행 제외) — 그룹 배경 대비로 잘 보이게 */
+.policy-group-tool-row:not(:last-child) {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+:root[data-theme="light"] .policy-group-tool-row:not(:last-child) {
+  border-bottom-color: rgba(0, 0, 0, 0.18);
+}
+
 .policy-group-tool-row:hover {
-  background: rgba(255,255,255,0.04);
+  background: var(--hover);
 }
 
 .policy-group-tool-id {
@@ -221,7 +228,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   border-radius: 5px;
 }
 
-.cfg-section:hover { background: rgba(255,255,255,0.02); }
+.cfg-section:hover { background: var(--hover); }
 
 .cfg-section-key {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -274,14 +281,14 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   letter-spacing: 0.04em;
   border-bottom: 1px solid var(--border);
 }
-.cfg-tr:hover { background: rgba(255,255,255,0.03); }
+.cfg-tr:hover { background: var(--hover); }
 .cfg-td-key {
   padding: 4px 8px 4px 0;
   vertical-align: top;
   min-width: 180px;
   max-width: 320px;
   word-break: break-all;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--border);
 }
 .cfg-td-key code {
   color: #8ab4f8;
@@ -291,7 +298,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 .cfg-td-val {
   padding: 4px 8px;
   vertical-align: top;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--border);
   word-break: break-word;
 }
 .cfg-td-empty {
@@ -324,9 +331,15 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   border-radius: 4px;
 }
 
-.cfg-toggle:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+.cfg-toggle:hover { color: var(--text); background: var(--hover); }
 
 .cfg-array-inline { font-size: 0.78rem; }
+
+/* 라이트 모드: config 키/값 구문색을 흰 배경 대비에 맞게 진하게 (다크는 그대로) */
+:root[data-theme="light"] .cfg-td-key code { color: #1d4ed8; }
+:root[data-theme="light"] .cfg-string { color: #15803d; }
+:root[data-theme="light"] .cfg-number { color: #1d4ed8; }
+:root[data-theme="light"] .cfg-bool   { color: #c2410c; }
 
 .cfg-array-item {
   display: flex;
@@ -379,8 +392,8 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   min-width: 0;
 }
 
-.plugin-status-idle   { color: var(--muted); background: rgba(255,255,255,0.04); }
-.plugin-status-checking { color: var(--muted); background: rgba(255,255,255,0.04); font-style: italic; }
+.plugin-status-idle   { color: var(--muted); background: var(--hover); }
+.plugin-status-checking { color: var(--muted); background: var(--hover); font-style: italic; }
 .plugin-status-ok     { color: var(--ok);   background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.25); }
 .plugin-status-missing { color: var(--warn); background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); }
 .plugin-status-error  { color: var(--danger); background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25); }
@@ -522,7 +535,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-weight: 600;
   border: 1px solid transparent;
 }
-.remediation-badge-unknown { color: var(--muted); background: rgba(255,255,255,0.04); border-color: var(--border); }
+.remediation-badge-unknown { color: var(--muted); background: var(--hover); border-color: var(--border); }
 .remediation-badge-loading { color: var(--muted); font-style: italic; }
 .remediation-badge-blocked { color: var(--ok); background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3); }
 .remediation-badge-allowed { color: var(--warn); background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3); }
@@ -563,7 +576,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 14px;
@@ -584,8 +597,8 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-weight: 600;
   border: 1px solid transparent;
 }
-.guardrail-badge-unknown { color: var(--muted); background: rgba(255,255,255,0.04); border-color: var(--border); }
-.guardrail-badge-loading { color: var(--muted); background: rgba(255,255,255,0.04); border-color: var(--border); font-style: italic; }
+.guardrail-badge-unknown { color: var(--muted); background: var(--hover); border-color: var(--border); }
+.guardrail-badge-loading { color: var(--muted); background: var(--hover); border-color: var(--border); font-style: italic; }
 .guardrail-badge-on  { color: var(--ok); background: rgba(16,185,129,0.1); border-color: rgba(16,185,129,0.3); }
 .guardrail-badge-off { color: var(--warn); background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3); }
 .guardrail-badge-error { color: var(--danger); background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.25); }
@@ -645,7 +658,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 }
 
 .pl-check-card {
-  background: #101c2f;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
@@ -669,7 +682,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   font-weight: 700;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
-  background: rgba(255,255,255,0.04);
+  background: var(--hover);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 4px 9px;
@@ -693,7 +706,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
 
 .pl-check-method {
   font-size: 0.7rem;
-  color: #93c5fd;
+  color: var(--accent-text);
   background: rgba(59,130,246,0.1);
   border: 1px solid rgba(59,130,246,0.2);
   border-radius: 4px;
@@ -794,7 +807,7 @@ details[open] .policy-section-summary::before { transform: rotate(90deg); }
   align-items: center;
   gap: 12px;
   padding: 18px 16px;
-  background: #101c2f;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 10px;
   color: var(--muted);

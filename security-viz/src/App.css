@@ -9,6 +9,7 @@
  *  - policy:         policy 탭 + tools.catalog + diff + pl-* Policy Check
  *  - scenario-flow:  실행 흐름 패널 (ft-*) + exfil/fetch-gate/intercept/anomaly
  *  - monitoring:     monitoring 탭 (summary/history/exec flow/remediation/rate limit)
+ *  - docs:           docs 탭 + 내부 하위 탭(chat/monitoring/policy/scenario 튜토리얼)
  */
 @import "./styles/base.css";
 @import "./styles/connection.css";
@@ -17,3 +18,4 @@
 @import "./styles/policy.css";
 @import "./styles/scenario-flow.css";
 @import "./styles/monitoring.css";
+@import "./styles/docs.css";

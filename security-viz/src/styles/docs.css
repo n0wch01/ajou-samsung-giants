@@ -1,0 +1,244 @@
+/**
+ * docs.css — Docs 탭. 좌측 세로 사이드바(Chat/Monitoring/Policy/Test Scenario) + 우측 본문.
+ */
+
+.docs {
+  display: flex;
+  align-items: stretch;
+  gap: 20px;
+  min-height: 320px;
+}
+
+/* ── 좌측 사이드바 ───────────────────────────────────────── */
+.docs-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 150px;
+  padding-right: 12px;
+  border-right: 1px solid var(--border);
+}
+
+.docs-navitem {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  padding: 9px 12px 9px 16px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.docs-navitem:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* 활성 항목: 좌측 accent 막대 + surface 배경 + 흰 텍스트 */
+.docs-navitem.active {
+  color: var(--text);
+  background: var(--surface);
+  font-weight: 600;
+}
+
+.docs-navitem.active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+
+.docs-navitem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* ── 우측 본문 ───────────────────────────────────────────── */
+.docs-content {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.docs-section[hidden] {
+  display: none !important;
+}
+
+.docs-section-title {
+  margin: 0 0 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* ── 본문 작성 프리미티브 (DocsPrimitives.tsx) ───────────── */
+.docs-article {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 760px;
+  font-size: 0.88rem;
+}
+
+.docs-placeholder {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.docs-lede {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.docs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.docs-block-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.docs-p {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.docs-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docs-step {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.docs-step::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.docs-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+/* 콜아웃 */
+.docs-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  background: var(--surface);
+  line-height: 1.55;
+}
+
+.docs-note--info {
+  border-left-color: var(--accent);
+}
+.docs-note--tip {
+  border-left-color: var(--ok);
+}
+.docs-note--warn {
+  border-left-color: var(--warn);
+}
+
+.docs-note-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.docs-note-body {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* 용어-설명 목록 */
+.docs-deflist {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docs-def {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.docs-def-term {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.docs-def-desc {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+@media (max-width: 520px) {
+  .docs-def {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
+/* ── 좁은 화면: 사이드바를 상단 가로 배치로 ───────────────── */
+@media (max-width: 640px) {
+  .docs {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .docs-sidebar {
+    flex: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-right: 0;
+    padding-bottom: 8px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .docs-navitem.active::before {
+    display: none;
+  }
+}

@@ -49,9 +49,9 @@ function DonutChart({ plugin, md, abuse, other }: DonutProps) {
   if (total === 0) {
     return (
       <svg width="140" height="140" viewBox="0 0 140 140">
-        <circle cx={cx} cy={cy} r={r} fill="none" stroke="#1a2e4a" strokeWidth="18" />
-        <text x={cx} y={cy - 6} textAnchor="middle" fill="#8a99b8" fontSize="11">탐지</text>
-        <text x={cx} y={cy + 10} textAnchor="middle" fill="#8a99b8" fontSize="11">없음</text>
+        <circle cx={cx} cy={cy} r={r} fill="none" style={{ stroke: "var(--border)" }} strokeWidth="18" />
+        <text x={cx} y={cy - 6} textAnchor="middle" style={{ fill: "var(--muted)" }} fontSize="11">탐지</text>
+        <text x={cx} y={cy + 10} textAnchor="middle" style={{ fill: "var(--muted)" }} fontSize="11">없음</text>
       </svg>
     );
   }
@@ -91,10 +91,10 @@ function DonutChart({ plugin, md, abuse, other }: DonutProps) {
           />
         ))}
       </g>
-      <text x={cx} y={cy - 6} textAnchor="middle" fill="#e8edf5" fontSize="22" fontWeight="bold">
+      <text x={cx} y={cy - 6} textAnchor="middle" style={{ fill: "var(--text)" }} fontSize="22" fontWeight="bold">
         {total}
       </text>
-      <text x={cx} y={cy + 12} textAnchor="middle" fill="#8a99b8" fontSize="10">
+      <text x={cx} y={cy + 12} textAnchor="middle" style={{ fill: "var(--muted)" }} fontSize="10">
         총 탐지
       </text>
     </svg>
