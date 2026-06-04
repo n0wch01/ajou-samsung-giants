@@ -86,6 +86,143 @@
   color: var(--text);
 }
 
+/* ── 본문 작성 프리미티브 (DocsPrimitives.tsx) ───────────── */
+.docs-article {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 760px;
+  font-size: 0.88rem;
+}
+
+.docs-placeholder {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.docs-lede {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.docs-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.docs-block-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.docs-p {
+  margin: 0;
+  line-height: 1.65;
+  color: var(--text);
+}
+
+.docs-steps {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docs-step {
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.docs-step::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.docs-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.82em;
+  padding: 1px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+/* 콜아웃 */
+.docs-note {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  background: var(--surface);
+  line-height: 1.55;
+}
+
+.docs-note--info {
+  border-left-color: var(--accent);
+}
+.docs-note--tip {
+  border-left-color: var(--ok);
+}
+.docs-note--warn {
+  border-left-color: var(--warn);
+}
+
+.docs-note-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.docs-note-body {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+/* 용어-설명 목록 */
+.docs-deflist {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.docs-def {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.docs-def-term {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.docs-def-desc {
+  margin: 0;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+@media (max-width: 520px) {
+  .docs-def {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 /* ── 좁은 화면: 사이드바를 상단 가로 배치로 ───────────────── */
 @media (max-width: 640px) {
   .docs {
