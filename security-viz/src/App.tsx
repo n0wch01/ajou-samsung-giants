@@ -17,9 +17,23 @@ export type NavAction = {
   highlightSection?: string | null;
 };
 
+type ThemeMode = "dark" | "light";
+
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
+
+  // 라이트/다크 테마 — documentElement[data-theme] + localStorage 저장
+  const [theme, setTheme] = useState<ThemeMode>(
+    () => (localStorage.getItem("sg.viz.theme") === "light" ? "light" : "dark"),
+  );
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("sg.viz.theme", theme);
+  }, [theme]);
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+  }, []);
   const [alertResetKey, setAlertResetKey] = useState(0);
   const [monitoringClearKey, setMonitoringClearKey] = useState(0);
 
@@ -174,6 +188,19 @@ export function App() {
               </button>
             </nav>
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={theme === "light"}
+            className="app-theme-switch"
+            onClick={toggleTheme}
+            aria-label="라이트/다크 모드 전환"
+            title={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+          >
+            <span className="app-theme-switch-knob" aria-hidden="true">
+              {theme === "dark" ? "🌙" : "☀"}
+            </span>
+          </button>
         </div>
       </header>
       <div className="app-body">

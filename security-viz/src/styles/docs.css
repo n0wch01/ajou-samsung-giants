@@ -40,7 +40,7 @@
 
 .docs-navitem:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
 }
 
 /* 활성 항목: 좌측 accent 막대 + surface 배경 + 흰 텍스트 */

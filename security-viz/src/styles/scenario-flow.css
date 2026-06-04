@@ -497,7 +497,7 @@
 
 .ft-scenario-body-toggle:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
 }
 
 .ft-scenario-body-toggle:focus-visible {
@@ -608,6 +608,19 @@
   padding: 12px 14px;
   font-size: 0.93rem;
   line-height: 1.62;
+}
+
+/* 라이트: 검정 오버레이 회색 대신 깔끔한 흰 패널로 (다크는 그대로) */
+:root[data-theme="light"] .ft-response {
+  background: var(--surface-2);
+}
+:root[data-theme="light"] .ft-response-agent-final {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+/* 최종 응답을 감싸는 패널(그 뒤 배경) */
+:root[data-theme="light"] .ft-agent-reply-panel {
+  background: var(--surface);
 }
 
 /* 실행 흐름 2행: 최종 응답 스텝은 기본 .ft-step(280×480) 제한을 풀고 넓게 */

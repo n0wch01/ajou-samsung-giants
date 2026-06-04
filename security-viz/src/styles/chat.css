@@ -33,7 +33,7 @@
 .chat-empty-icon-live {
   background: rgba(59,130,246,0.1);
   border: 1px solid rgba(59,130,246,0.25);
-  color: #93c5fd;
+  color: var(--accent-text);
 }
 
 .chat-empty-title {
@@ -68,7 +68,7 @@
   gap: 6px;
   font-size: 0.78rem;
   color: var(--muted);
-  background: rgba(255,255,255,0.04);
+  background: var(--hover);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 5px 10px;
@@ -79,7 +79,7 @@
   height: 18px;
   border-radius: 50%;
   background: rgba(59,130,246,0.2);
-  color: #93c5fd;
+  color: var(--accent-text);
   font-size: 0.68rem;
   font-weight: 700;
   display: flex;
@@ -127,7 +127,7 @@
   flex-shrink: 0;
 }
 
-.badge-blue   { background: rgba(59,130,246,0.15);  color: #93c5fd;  border: 1px solid rgba(59,130,246,0.3); }
+.badge-blue   { background: rgba(59,130,246,0.15);  color: var(--accent-text);  border: 1px solid rgba(59,130,246,0.3); }
 .badge-purple { background: rgba(168,85,247,0.15);  color: #c4b5fd;  border: 1px solid rgba(168,85,247,0.3); }
 .badge-orange { background: rgba(245,158,11,0.15);  color: #fcd34d;  border: 1px solid rgba(245,158,11,0.3); }
 .badge-red    { background: rgba(239,68,68,0.15);   color: #fca5a5;  border: 1px solid rgba(239,68,68,0.3); }
@@ -137,8 +137,8 @@
   margin-top: 0;
   border-radius: 14px;
   overflow: hidden;
-  border: 1px solid #1a2e4a;
-  background: #0b1628;
+  border: 1px solid var(--border);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
 }
@@ -146,8 +146,8 @@
 .chat-input-bar {
   flex-shrink: 0;
   padding: 8px 10px;
-  background: #101c2f;
-  border-top: 1px solid #1a2e4a;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
   position: sticky;
   bottom: 0;
   z-index: 5;
@@ -165,9 +165,9 @@
   max-height: 120px;
   resize: none;
   border-radius: 18px;
-  border: 1px solid #1a2e4a;
-  background: #0b1628;
-  color: #e8edf5;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
   padding: 8px 14px;
   font-size: 0.88rem;
   line-height: 1.45;
@@ -217,8 +217,8 @@
   height: 26px;
   padding: 0 12px;
   border-radius: 13px;
-  border: 1px solid #1a2e4a;
-  background: #0b1628;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: #7a9cc0;
   font-size: 0.78rem;
   cursor: pointer;
@@ -227,7 +227,7 @@
 }
 
 .chat-mode-btn:hover {
-  background: #1a2e4a;
+  background: var(--border);
   color: #e8edf5;
 }
 
@@ -242,8 +242,8 @@
   min-width: 160px;
   height: 26px;
   border-radius: 6px;
-  border: 1px solid #1a2e4a;
-  background: #0b1628;
+  border: 1px solid var(--border);
+  background: var(--surface);
   color: #a0b8d4;
   padding: 0 10px;
   font-size: 0.76rem;
@@ -257,8 +257,8 @@
 .bridge-reply {
   margin-bottom: 8px;
   border-radius: 8px;
-  border: 1px solid #1a2e4a;
-  background: #0b1628;
+  border: 1px solid var(--border);
+  background: var(--surface);
   overflow: hidden;
 }
 
@@ -266,7 +266,7 @@
   padding: 6px 10px;
   font-size: 0.78rem;
   color: #7a9cc0;
-  border-bottom: 1px solid #1a2e4a;
+  border-bottom: 1px solid var(--border);
   word-break: break-word;
 }
 
@@ -288,7 +288,7 @@
   justify-content: center;
   gap: 12px;
   padding: 24px;
-  background: #0b1628;
+  background: var(--surface);
 }
 
 .chat-empty-illust {
@@ -320,9 +320,9 @@
   font-size: 0.95rem;
   font-weight: 700;
   text-align: center;
-  background: #101c2f;
-  color: #f0f4fc;
-  border-bottom: 1px solid #1a2e4a;
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
 }
 
 .chat-room-avatar {
@@ -335,7 +335,7 @@
   flex: 1;
   overflow-y: auto;
   padding: 14px 12px 20px;
-  background: linear-gradient(180deg, #0d1e35 0%, #0b1628 40%, #07111f 100%);
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 40%, var(--bg) 100%);
 }
 
 .chat-room-wait {
@@ -410,6 +410,13 @@
   line-height: 1.5;
   word-break: break-word;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* 라이트: 채팅 배경(흰~연회색)과 말풍선이 묻히지 않게 테두리로 구분 */
+:root[data-theme="light"] .chat-bubble-assistant {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 /* 마크다운 렌더링 */
@@ -491,7 +498,7 @@
 
 .chat-tools-none {
   font-size: 0.72rem;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--muted);
   margin-right: 4px;
 }
 
@@ -557,7 +564,7 @@
 .chat-tool-pill-name {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-weight: 600;
-  color: #93c5fd;
+  color: var(--accent-text);
 }
 
 .chat-tool-pill-meta {
@@ -576,7 +583,7 @@
   margin: 6px 0 0;
   padding: 10px 12px;
   border-radius: 8px;
-  background: #101c2f;
+  background: var(--surface-2);
   border: 1px solid rgba(255, 255, 255, 0.08);
   font-size: 0.72rem;
   line-height: 1.45;

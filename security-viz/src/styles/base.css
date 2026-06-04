@@ -1,7 +1,9 @@
 :root {
+  /* 기본 = 다크 테마. 라이트는 :root[data-theme="light"] 에서 덮어쓴다. */
   color-scheme: dark;
   --bg: #07111f;
   --surface: #0b1628;
+  --surface-2: #101c2f; /* 카드/패널 — surface보다 한 단계 밝은 표면 */
   --border: #1a2e4a;
   --text: #e8edf5;
   --muted: #8a99b8;
@@ -9,6 +11,10 @@
   --warn: #f59e0b;
   --danger: #ef4444;
   --ok: #10b981;
+  /* 변수를 안 거치고 흩어져 있던 미세 오버레이를 테마별로 전환하기 위한 토큰 */
+  --hover: rgba(255, 255, 255, 0.04);
+  /* 옅은 틴트 배경 위 파란 강조 텍스트 (버튼/도구명/배지) */
+  --accent-text: var(--accent-text);
   font-family:
     ui-sans-serif,
     system-ui,
@@ -21,6 +27,22 @@
   background: var(--bg);
   color: var(--text);
   line-height: 1.45;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #e9edf3;
+  --surface: #f6f8fb;
+  --surface-2: #ffffff; /* 라이트: 회색 표면 위로 떠오르는 흰 카드 */
+  --border: #ced6e2;
+  --text: #1d2736;
+  --muted: #5b6a85;
+  --accent: #2563eb;
+  --warn: #b45309;
+  --danger: #dc2626;
+  --ok: #047857;
+  --hover: rgba(0, 0, 0, 0.05);
+  --accent-text: #1d4ed8;
 }
 
 * {
@@ -166,13 +188,58 @@ a {
 
 .app-tab:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
 }
 
 .app-tab.active {
   color: var(--text);
   border-color: var(--border);
   background: var(--surface);
+}
+
+/* 라이트/다크 테마 스위치 (헤더 우측) */
+.app-theme-switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 50px;
+  height: 26px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  cursor: pointer;
+  transition: background 0.18s ease;
+}
+
+.app-theme-switch:hover {
+  background: var(--hover);
+}
+
+.app-theme-switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.app-theme-switch-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s ease;
+}
+
+/* 라이트 모드: knob을 오른쪽으로 슬라이드 */
+:root[data-theme="light"] .app-theme-switch-knob {
+  transform: translateX(24px);
 }
 
 .tab-panel[hidden] {
@@ -291,7 +358,7 @@ textarea {
 
 button {
   cursor: pointer;
-  background: #0b1628;
+  background: var(--surface);
 }
 
 button.primary {
@@ -340,6 +407,6 @@ button:disabled {
   border-radius: 8px;
   padding: 12px;
   margin-bottom: 12px;
-  background: #101c2f;
+  background: var(--surface);
 }
 
