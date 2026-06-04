@@ -5,9 +5,10 @@ import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
 import { StageMonitoring } from "./panels/StageMonitoring";
+import { StageDocs } from "./panels/StageDocs";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario";
+export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario" | "docs";
 
 export type NavAction = {
   tab: AppMainTab;
@@ -162,6 +163,15 @@ export function App() {
               >
                 Test Scenario
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "docs"}
+                className={tab === "docs" ? "app-tab active" : "app-tab"}
+                onClick={() => navigate({ tab: "docs" })}
+              >
+                Docs
+              </button>
             </nav>
           </div>
         </div>
@@ -227,6 +237,10 @@ export function App() {
 
           <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
+          </section>
+
+          <section className="tab-panel docs-tab-panel" role="tabpanel" hidden={tab !== "docs"}>
+            <StageDocs />
           </section>
         </main>
       </div>
