@@ -198,7 +198,7 @@
 
 .docs-def {
   display: grid;
-  grid-template-columns: 120px 1fr;
+  grid-template-columns: 260px 1fr;
   gap: 12px;
   align-items: baseline;
 }

@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { ChatDocs } from "./docs/ChatDocs";
 import { MonitoringDocs } from "./docs/MonitoringDocs";
 import { PolicyDocs } from "./docs/PolicyDocs";
+import { ScenarioDocs } from "./docs/ScenarioDocs";
 
 /** Docs 탭 내부 하위 영역 — 메인 탭(Chat/Monitoring/Policy/Test Scenario)과 1:1 대응. */
 type DocsSection = "chat" | "monitoring" | "policy" | "scenario";
@@ -41,12 +43,15 @@ export function StageDocs() {
             className="docs-section"
           >
             <h2 className="docs-section-title">{s.label} 튜토리얼</h2>
-            {s.id === "policy" ? (
-              <PolicyDocs />
+            {s.id === "chat" ? (
+              <ChatDocs />
             ) : s.id === "monitoring" ? (
               <MonitoringDocs />
+            ) : s.id === "policy" ? (
+              <PolicyDocs />
+            ) : s.id === "scenario" ? (
+              <ScenarioDocs />
             ) : (
-              /* TODO: {s.label} 탭 사용법/튜토리얼 작성 */
               <p className="docs-placeholder">작성 예정입니다.</p>
             )}
           </section>
