@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ChatDocs } from "./docs/ChatDocs";
+import { MonitoringDocs } from "./docs/MonitoringDocs";
 import { PolicyDocs } from "./docs/PolicyDocs";
 import { ScenarioDocs } from "./docs/ScenarioDocs";
 
@@ -44,12 +45,13 @@ export function StageDocs() {
             <h2 className="docs-section-title">{s.label} 튜토리얼</h2>
             {s.id === "chat" ? (
               <ChatDocs />
+            ) : s.id === "monitoring" ? (
+              <MonitoringDocs />
             ) : s.id === "policy" ? (
               <PolicyDocs />
             ) : s.id === "scenario" ? (
               <ScenarioDocs />
             ) : (
-              /* TODO: {s.label} 탭 사용법/튜토리얼 작성 */
               <p className="docs-placeholder">작성 예정입니다.</p>
             )}
           </section>
