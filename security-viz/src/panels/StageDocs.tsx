@@ -49,10 +49,8 @@ export function StageDocs() {
               <MonitoringDocs />
             ) : s.id === "policy" ? (
               <PolicyDocs />
-            ) : s.id === "scenario" ? (
-              <ScenarioDocs />
             ) : (
-              <p className="docs-placeholder">작성 예정입니다.</p>
+              <ScenarioDocs />
             )}
           </section>
         ))}
