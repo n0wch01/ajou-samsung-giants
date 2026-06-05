@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MonitoringDocs } from "./docs/MonitoringDocs";
 import { PolicyDocs } from "./docs/PolicyDocs";
 
 /** Docs 탭 내부 하위 영역 — 메인 탭(Chat/Monitoring/Policy/Test Scenario)과 1:1 대응. */
@@ -42,6 +43,8 @@ export function StageDocs() {
             <h2 className="docs-section-title">{s.label} 튜토리얼</h2>
             {s.id === "policy" ? (
               <PolicyDocs />
+            ) : s.id === "monitoring" ? (
+              <MonitoringDocs />
             ) : (
               /* TODO: {s.label} 탭 사용법/튜토리얼 작성 */
               <p className="docs-placeholder">작성 예정입니다.</p>
