@@ -33,20 +33,6 @@ export function MonitoringDocs() {
           화면 상단에 세 가지 탐지 유형의 건수가 카드 형태로 표시됩니다.
           숫자가 0보다 크면 해당 유형의 위협이 탐지된 것입니다.
         </DocP>
-        <DocDefList>
-          <DocDef term="악성 플러그인 탐지">
-            허용 목록(화이트리스트)에 없는 도구를 플러그인이 등록하거나 호출한 경우입니다.
-            공급망 공격(S1 시나리오)에 해당합니다.
-          </DocDef>
-          <DocDef term="악성 MD 탐지">
-            마크다운 파일 안에 숨겨진 악성 지시문(프롬프트 인젝션)이 감지된 경우입니다.
-            데이터 유출 시도(S2 시나리오)와 관련됩니다.
-          </DocDef>
-          <DocDef term="API Abuse 탐지">
-            짧은 시간 안에 같은 도구를 지나치게 많이 호출해 과금이 폭증할 위험이 있는
-            경우입니다. API 남용(S3 시나리오)에 해당합니다.
-          </DocDef>
-        </DocDefList>
       </DocBlock>
 
       <DocBlock title="도넛 차트">
