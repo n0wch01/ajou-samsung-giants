@@ -3,7 +3,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   overflow: hidden;
-  background: #101c2f;
+  background: var(--surface-2);
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -172,7 +172,7 @@
 .cp-btn-connect {
   background: rgba(59,130,246,0.15);
   border-color: rgba(59,130,246,0.6);
-  color: #93c5fd;
+  color: var(--accent-text);
 }
 
 .cp-btn-connect:hover:not(:disabled) {
@@ -199,6 +199,14 @@
 .cp-btn-disconnect:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+/* 라이트 모드: 옅은 틴트 배경 위에서 글자가 잘 보이도록 진하게 (다크는 그대로) */
+:root[data-theme="light"] .cp-btn-connect {
+  color: #1d4ed8;
+}
+:root[data-theme="light"] .cp-btn-disconnect {
+  color: var(--danger);
 }
 
 .cp-error {
@@ -289,7 +297,7 @@
   gap: 10px;
   margin: 10px 0 4px;
   padding: 8px 12px;
-  background: rgba(255,255,255,0.04);
+  background: var(--hover);
   border: 1px solid var(--border);
   border-radius: 8px;
 }
@@ -350,7 +358,7 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  background: #101c2f;
+  background: var(--surface-2);
 }
 
 .scenario-card.is-planned {

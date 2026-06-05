@@ -5,9 +5,10 @@ import { StageInput } from "./panels/StageInput";
 import { StagePolicy } from "./panels/StagePolicy";
 import { StageScenario } from "./panels/StageScenario";
 import { StageMonitoring } from "./panels/StageMonitoring";
+import { StageDocs } from "./panels/StageDocs";
 import { useGatewayReadonly } from "./gateway/useGatewayReadonly";
 
-export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario";
+export type AppMainTab = "chat" | "monitoring" | "policy" | "scenario" | "docs";
 
 export type NavAction = {
   tab: AppMainTab;
@@ -16,9 +17,23 @@ export type NavAction = {
   highlightSection?: string | null;
 };
 
+type ThemeMode = "dark" | "light";
+
 export function App() {
   const gw = useGatewayReadonly();
   const [tab, setTab] = useState<AppMainTab>("chat");
+
+  // 라이트/다크 테마 — documentElement[data-theme] + localStorage 저장
+  const [theme, setTheme] = useState<ThemeMode>(
+    () => (localStorage.getItem("sg.viz.theme") === "light" ? "light" : "dark"),
+  );
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("sg.viz.theme", theme);
+  }, [theme]);
+  const toggleTheme = useCallback(() => {
+    setTheme((t) => (t === "dark" ? "light" : "dark"));
+  }, []);
   const [alertResetKey, setAlertResetKey] = useState(0);
   const [monitoringClearKey, setMonitoringClearKey] = useState(0);
 
@@ -162,8 +177,30 @@ export function App() {
               >
                 Test Scenario
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "docs"}
+                className={tab === "docs" ? "app-tab active" : "app-tab"}
+                onClick={() => navigate({ tab: "docs" })}
+              >
+                Docs
+              </button>
             </nav>
           </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={theme === "light"}
+            className="app-theme-switch"
+            onClick={toggleTheme}
+            aria-label="라이트/다크 모드 전환"
+            title={theme === "dark" ? "라이트 모드로 전환" : "다크 모드로 전환"}
+          >
+            <span className="app-theme-switch-knob" aria-hidden="true">
+              {theme === "dark" ? "🌙" : "☀"}
+            </span>
+          </button>
         </div>
       </header>
       <div className="app-body">
@@ -227,6 +264,10 @@ export function App() {
 
           <section className="tab-panel scenario-tab-panel" role="tabpanel" hidden={tab !== "scenario"}>
             <StageScenario wsUrl={wsUrl} token={token} sessionKey={sessionKey} entries={gw.timeline} injectFrame={gw.injectFrame} />
+          </section>
+
+          <section className="tab-panel docs-tab-panel" role="tabpanel" hidden={tab !== "docs"}>
+            <StageDocs />
           </section>
         </main>
       </div>
